@@ -1,0 +1,13 @@
+{
+    "api_option": "Auto",
+    "ar_option": "Expand",
+    "developer_mode": false,
+    "ds_option": 0,
+    "hpfb_option": "Off",
+    "hr_option": "Clamp16x9",
+    "msaa_option": "MSAA2X",
+    "res_option": "Auto",
+    "rr_manual_value": 60,
+    "rr_option": "Display",
+    "wm_option": "Windowed"
+}

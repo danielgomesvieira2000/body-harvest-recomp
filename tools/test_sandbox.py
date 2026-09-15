@@ -3,12 +3,12 @@
 
     python tools/test_sandbox.py --exe build/body-harvest-recomp.exe --title "Body Harvest: Recompiled" \
         --rom rom.z64 --capture 20 30 --out shots/run1 [--env BH_INPUT_SCRIPT=tools/scripts/x.txt] \
-        [--seed path/to/controller_pak_1.pak] [--keep]
+        [--seed path/to/hud.json] [--grab 10,20,30] [--keep]
 
     python tools/test_sandbox.py --exe build/... --rom rom.z64 --seconds 45 --out shots/run2
 
 Why: a test that drops `portable.txt` beside a shared build redirects the settings of whoever launches
-that build next. On Body Harvest a leftover one captured Daniel's own session, and the cleanup that
+that build next. On Hybrid Heaven a leftover one captured Daniel's own session, and the cleanup that
 followed deleted his Controller Pak (playbook 10, working-style.md "Test runs leave nothing behind").
 
 What it does:
@@ -19,7 +19,9 @@ What it does:
    this tool does not isolate it.
 2. Copies each `--seed` file into the sandbox (a pak, a hud.json, a graphics.json).
 3. Runs it: with `--capture FROM TO` through `capture_frames.py` (frames + `game.log` in `--out`),
-   otherwise for `--seconds` with output to `--out/game.log`.
+   otherwise for `--seconds` with output to `--out/game.log`; `--grab 10,20` also photographs the
+   window at those seconds with `grab_window.ps1` (by process id; the window must be uncovered).
+   Body Harvest added --grab: `capture_frames.py` saved 0 frames of this port's window on this machine.
 4. Copies the sandbox's settings files that changed into `--out/settings/` (so a test's saves can
    be inspected), then deletes the sandbox, unless `--keep`.
 
@@ -68,6 +70,7 @@ def main():
     ap.add_argument("--seed", action="append", default=[], type=Path, help="file copied into the sandbox")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--keep", action="store_true", help="leave the sandbox for inspection")
+    ap.add_argument("--grab", default="", help="comma-separated seconds at which to grab the window")
     args = ap.parse_args()
 
     exe = args.exe.resolve()
@@ -109,8 +112,20 @@ def main():
             with open(out / "game.log", "w") as log:
                 proc = subprocess.Popen([str(sandbox_exe)] + ([rom] if rom else []), cwd=sandbox, env=env,
                                         stdout=log, stderr=subprocess.STDOUT)
+                grabs = sorted(float(s) for s in args.grab.split(",") if s.strip())
+                launched = time.time()
+                for at in grabs:
+                    delay = at - (time.time() - launched)
+                    if delay > 0:
+                        time.sleep(delay)
+                    if proc.poll() is not None:
+                        break
+                    png = out / f"grab_t{at:05.1f}s.png"
+                    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File",
+                                    str(HERE / "grab_window.ps1"), "-Out", str(png), "-ProcId", str(proc.pid)],
+                                   check=False, stdout=subprocess.DEVNULL)
                 try:
-                    proc.wait(timeout=args.seconds)
+                    proc.wait(timeout=max(0.0, args.seconds - (time.time() - launched)))
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()

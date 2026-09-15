@@ -1,0 +1,7 @@
+// The executable's icon, as Windows Explorer and the taskbar show it.
+//
+// Drawn by tools/make_logo.py from the same polygons as the launcher emblem
+// (assets/icons/Logo.svg), and written at each standard icon size rather than
+// scaled from one. The .ico is committed so the build needs no Python; run the
+// script again if the emblem changes.
+IDI_ICON1 ICON "../assets/AppIcon.ico"

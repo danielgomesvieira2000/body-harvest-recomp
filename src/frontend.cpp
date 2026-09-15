@@ -75,9 +75,10 @@ std::filesystem::path controls_config_path() {
 ultramodern::renderer::PresentationMode presentation_mode();
 
 // Sits between ultramodern and RecompFrontend's renderer so every display list
-// can be looked at before RT64 sees it (BH_DL_CENSUS, include/bh/dlcensus.h).
-// Everything is forwarded untouched. Wave Race 64's RewritingContext has the
-// same shape; phase 07 decides whether this port rewrites lists too (D11).
+// can be looked at before RT64 sees it: the HUD inspector's feed and the census
+// (BH_DL_CENSUS, include/bh/dlcensus.h), and the HUD rewriter's copy when an
+// element has a class (include/bh/hudrewrite.h). Wave Race 64's RewritingContext
+// and Hybrid Heaven's CensusContext have the same shape.
 class CensusContext final : public ultramodern::renderer::RendererContext {
 public:
     CensusContext(uint8_t* rdram, std::unique_ptr<ultramodern::renderer::RendererContext> inner)
@@ -198,10 +199,10 @@ void build_launcher(recompui::LauncherMenu* menu) {
         {});
 
     // The launcher's own background, distinct from the game thumbnail above:
-    // original artwork supplied with the project (assets/icons/Logo.svg, drawn
-    // by tools/make_logo.py), not derived from the cartridge. It is an emblem
-    // with no lettering, so the library's plain-text title stays (playbook 07:
-    // remove it only when the art spells the name).
+    // original artwork supplied with the project (assets/icons/Logo.svg, two
+    // low-polygon saucers drawn by tools/make_logo.py), not derived from the
+    // cartridge. It has no lettering, so the library's plain-text title stays
+    // (playbook 07: remove it only when the art spells the name).
     menu->set_launcher_background_svg("icons/Logo.svg");
 
     options->add_start_game_or_load_rom_option("Load ROM", "Start Game");
@@ -211,7 +212,7 @@ void build_launcher(recompui::LauncherMenu* menu) {
     // Closing the window works, but a menu the pad can reach should not need a
     // mouse to leave. add_exit_option calls ultramodern::quit(), which unwinds
     // the game thread and the renderer in order rather than tearing the process
-    // down, so the Controller Pak file is flushed on the way out.
+    // down, so the EEPROM save is flushed on the way out.
     options->add_exit_option("Quit");
 }
 
@@ -279,21 +280,19 @@ void init() {
 
     recompui::register_launcher_init_callback(build_launcher);
 
-    // Body Harvest is listed as a two-player game (docs/findings/phase-00.md) and
-    // its main menu offers BATTLE MODE, so the controls tab offers two player slots
-    // rather than the frontend's default four (docs/PLAN.md D9). Which pad is
-    // which is not a choice anyone should have to make: the port assigns them in
-    // the order they are connected (refresh_players in src/callbacks.cpp), and
-    // the modal in the controls tab is left for anyone who wants to override it.
-    recompinput::players::set_player_count_range(1, 2);
+    // Body Harvest is one player (docs/PLAN.md D8). Single-player mode merges the
+    // keyboard profile with every connected pad, so there is nothing to assign
+    // (Rayman 2 and Pilotwings 64 do the same).
+    recompinput::players::set_player_count_range(1, 1);
+    recompinput::players::set_single_player_mode(true);
 
     // The prefab tabs. Body Harvest has no gyro or mouse control.
     //
     // Rumble strength is on, and it is the only control the feedback has: the
     // slider is 0-100, recompinput scales the motor by it, and zero is off. The
-    // game drives a Rumble Pak, which this port serves on the Controller Pak's
-    // slot (src/si_pak.cpp, docs/PLAN.md D6). Without the option the whole rumble
-    // path in recompinput is skipped, so this line is also what turns rumble on.
+    // game drives a Rumble Pak through osMotorStart/Stop, which the runtime turns
+    // into set_rumble calls (src/callbacks.cpp). Without the option the whole
+    // rumble path in recompinput is skipped, so this line also turns rumble on.
     recompui::config::GeneralTabOptions general{};
     general.has_rumble_strength = true;
     general.has_gyro_sensitivity = false;

@@ -1,22 +1,21 @@
 # Porting reference
 
-How this port is put together and why each piece is the way it is: the pipeline
-from a dump to an executable, the runtime harness, patches, and the enhancements.
-Facts about the game are in [GAME-INTERNALS.md](GAME-INTERNALS.md); the
-step-by-step build is [BUILDING.md](BUILDING.md); how each fact was found is in
-[findings/](findings).
+How this port is put together and why each piece is the way it is: the pipeline from a dump to an
+executable, the runtime harness, patches, and the enhancements. Facts about the game are in
+[GAME-INTERNALS.md](GAME-INTERNALS.md); how each fact was found is in [findings/](findings).
 
-Each section states the **symptom first**, because a symptom is what you will have
-when you come looking.
+Each section states the **symptom first**, because a symptom is what you will have when you come
+looking.
 
 Pinned upstream revisions:
 
 | Submodule | Commit |
 |---|---|
-| N64ModernRuntime | `` |
-| N64Recomp (inside N64ModernRuntime) | `` |
-| RT64 | `` |
-| RecompFrontend | `` |
+| N64ModernRuntime | `cdf5abb` (upstream; Wave Race 64's pin) |
+| N64Recomp (inside N64ModernRuntime) | `81213c1` |
+| RT64 | `5473732` |
+| RecompFrontend | `b1a1477` |
+| bh-decomp (jaytheham/body-harvest-decompilation, no licence) | `4600677` |
 
 ## Contents
 
@@ -24,40 +23,174 @@ Pinned upstream revisions:
 2. [The ELF](#the-elf)
 3. [Recompiling](#recompiling)
 4. [The harness](#the-harness)
-5. [Patches](#patches)
-6. [Widescreen](#widescreen)
-7. [Frame interpolation](#frame-interpolation)
-8. [Submodule patches](#submodule-patches)
-9. [Testing and diagnostics](#testing-and-diagnostics)
+5. [libultra the runtime owns, and what it forgot](#libultra-the-runtime-owns-and-what-it-forgot)
+6. [Overlays](#overlays)
+7. [Renderer](#renderer)
+8. [Frontend and the F1 inspector](#frontend-and-the-f1-inspector)
+9. [Submodule patches](#submodule-patches)
+10. [Testing and diagnostics](#testing-and-diagnostics)
 
 ## The pipeline
 
 ```
-dump.z64 ──▶ body-harvest.elf ──N64Recomp──▶ RecompiledFuncs/ ──CMake──▶ body-harvest-recomp
-                               ──RSPRecomp──▶ audio microcode
-patches/ ──────────────────────────────────▶ RecompiledPatches/
+rom.z64 ─▶ lib/bh-decomp (WSL mirror, make) ─▶ build/bh.us.elf ─fix_elf.py─▶ elf/bh.us.fixed.elf
+        ─verify_elf.py (all zero)─▶ N64Recomp ─▶ RecompiledFuncs/ ─CMake─▶ body-harvest-recomp
+rom.z64 ─RSPRecomp (aspMain)──────────────────▶ RecompiledFuncs/aspMain_rsp.cpp
 ```
+
+One command: `wsl -d Ubuntu -e bash tools/regenerate.sh` (builds the recompiler if needed, then
+`wsl_build_elf.sh`, then `recompile.sh`). Every stage checks its end state and prints counts.
 
 ## The ELF
 
+**Route A** (playbook 01): the decomp's own matching build. `tools/wsl_build_elf.sh` rsyncs the
+submodule to `~/.cache/body-harvest-recomp/decomp` (a build on `/mnt/c` is slow), copies the dump in as
+`baserom.us.z64`, runs `make extract && make`, and refuses the ELF unless the log says
+`build/bh.us.z64: OK`. The decomp's `requirements.txt` pins `tree-sitter` versions with no wheel for
+current Python; they are for m2c/permuter only and are skipped.
+
+**Symptom: functions silently not recompiled / "Failed to find function".** `tools/fix_elf.py` repairs
+three symbol-table traps before N64Recomp sees the ELF:
+
+| Trap | In this ELF | Repair |
+|---|---|---|
+| Zero-size FUNC (hand-written asm `glabel` has no `.size`) | 173 | size = next FUNC/OBJECT start in the section |
+| FUNC in `SHN_ABS` (linker assignments from `undefined_syms.us.txt`) | 6 | demote aliases with a section twin to NOTYPE; rebind the 2 whose assignment shadows the only definition (`func_8011D260_12C210`, `func_80128504_1374B4`) by the ROM offset in their name |
+| Aliases at one address | `_bcopy/bcopy`, `_bzero/_blkclr/bzero/blkclr` | keep one FUNC |
+| Code no symbol covers (libultra `static` functions from the decomp's archive) | 4 functions in 3 gaps in core | rebind the referenced ABS `func_XXXXXXXX` name as a FUNC sized to the next boundary (keeping `jr $ra`'s delay slot) |
+
+The last one was found as a run-time miss at `0x8001F8B0` from `alBnkfNew` (phase 04).
+
+`tools/verify_elf.py` then checks: every PROGBITS section byte-identical to the dump at the ROM address
+N64Recomp computes (PT_LOAD paddr + offset), yaml code segments agree, address-named functions placed
+exactly, no ABS / size-0 / overlapping FUNC. Data labels whose names disagree with their address (31, a
+decomp naming slip) are listed, not failed.
+
 ## Recompiling
+
+`recomp/body-harvest.us.toml`: ELF mode, entry `0x80000400`, `use_lookup_for_all_function_calls = true`
+(overlays share vrams), `relocatable_sections_path = overlays.txt` (the eight overlays; the ELF has no
+`.rel` sections and N64Recomp accepts that).
+
+| Entry | Why |
+|---|---|
+| `ignored`: `func_800235E4_241E4` | Tail of `__osException` split off by splat; branches back into it. The runtime owns exceptions |
+
+`recomp/aspMain.us.toml`: stock `aspMain` (byte-identical to Pilotwings 64's), ROM `0x2FF10`, size
+`0xE20` (the task's declared `0xF80` overruns into the next microcode), IMEM `0x04001080`, 16-entry
+table from ROM `0x3FC70`.
+
+Counts (`tools/count_recompiled.py`): 3,045 FUNC − 125 runtime-owned − 1 ignored = 2,919 emitted.
 
 ## The harness
 
-## Patches
+Copied from Hybrid Heaven (itself Wave Race 64's), renamed; Controller Pak and Konami file-table code
+left out. Differences that matter:
 
-## Widescreen
+| Where | What |
+|---|---|
+| `src/main.cpp` | `SaveType::Eep4k`; `register_overlays()` before start; `set_message_queue_control` defaults |
+| `src/callbacks.cpp` | one player; port 1 reports `Pak::RumblePak` (`BH_NO_RUMBLE_PAK=1`: none); `aspMain` at `0x8002F310`; audio command-list copy at scratch `0x807F0000` |
+| `src/overlays.cpp` | section tables, runtime function table, resident registration, loader wrapper |
+| `src/libultra_glue.cpp` | wrappers for runtime libultra that lost a side effect (next section) |
+| `src/calltrace.cpp` | `BH_TRACE_FUNCS` call tracer |
 
-## Frame interpolation
+**Scratch RDRAM** (upper 4 MB, *inferred* free — no `osMemSize` use, game data ends below `0x80400000`):
+
+| Range | Use |
+|---|---|
+| `0x80700000`–`0x80780000` | HUD rewriter copies (two 256 KB buffers) |
+| `0x807EF000`–`0x807EF064` | controller-latency timer + queue |
+| `0x807F0000`–`0x80800000` | audio command-list private copy |
+
+## libultra the runtime owns, and what it forgot
+
+**Symptom: two display lists, then a frozen black window; audio and VI keep running.** Two causes, both
+fixed in `src/libultra_glue.cpp`:
+
+1. **`__osEepromTimerQ` never created.** The game's hand-written `osEepromLongRead` (`func_8001D5A0`)
+   waits ~16 ms per 8-byte block on a timer whose message goes to `__osEepromTimerQ` (`0x8006CA28`).
+   libultra's `osContInit` creates that queue (cartridge instruction `0x8001CEDC`); the runtime's
+   `osContInit` does not. Wrapper at `0x8001CD00`: runtime `osContInit`, then
+   `osCreateMesgQueue(0x8006CA28, 0x8006CA40, 1)`.
+2. **A controller thread that never blocks.** `func_80002EF8_3AF8` (priority 5) loops
+   `osContStartReadData` → `osRecvMesg(SI)` → process. The runtime completes SI transfers on the spot, so
+   the receive never blocks and ultramodern's cooperative scheduler never runs the priority-4 game
+   thread. Wrapper at `0x8001D6E0`: after starting the read, block the thread on a timer for
+   `BH_SI_LATENCY_MS` (default 1; 0 = off).
+
+General lesson: a libultra function the runtime owns by name loses every side effect the cartridge's
+body had; an unnamed routine that depended on it hangs far from the cause.
+
+## Overlays
+
+**Symptom: lookup misses inside `0x80070270`–`0x80149380` or `0x802D4CD0`–.** The overlay at that window
+was not announced.
+
+- `register_runtime_functions()` (from `on_init`) first unloads all eight overlays: librecomp's boot load
+  (ROM `0x1000` + 1 MB) registers the frontend overlay at `0x8003FB20` and records it as loaded there,
+  which would offset its first real load.
+- Resident functions (sections whose address nobody shares: core) are registered up front; runtime
+  libultra at cartridge addresses; the loader wrapper last.
+- `func_8000FFC0_10BC0(queue, dest, rom, size)` is wrapped: a load whose ROM start equals an overlay's
+  evicts every loaded overlay overlapping its range by id, loads it by id, then runs the game's copy.
+  Not `osPiStartDma` (Wave Race 64's hook): this loader DMAs in `0x800` pieces.
+- `BH_DEBUG_LOADS=1` prints every load (`[bh-load] overlay ...` / `data ...`).
+
+## Renderer
+
+**Symptom: Gfx-thread crash in `RT64::RDP::loadTLUTOperation` reading a wild address** (after START on
+the intro). RT64 `5473732` registers L3DEX 1.x as `GBIUCode::Unknown`, so an L3DEX list has only RDP
+handlers and is walked past its end. `tools/patch_rt64_l3dex.py` routes the four L3DEX 1.x entries to
+`GBIUCode::F3DEX` (finding from 12feihu's BodyHarvest-PC-Port). L3DEX's line command (0xB5) then decodes
+as F3DEX's quad.
+
+Presentation mode: `PresentEarly` (Wave Race's; `BH_PRESENT_MODE=console|skip|early`).
+
+## Frontend and the F1 inspector
+
+RecompFrontend as Wave Race 64 / Hybrid Heaven: launcher (Load ROM → Start Game, Controls, Settings,
+Mods, Quit), General (rumble strength) / Graphics / Sound (Main Volume, Mute When Not In Focus) /
+Controls / Mods tabs, series keyboard layout, single-player mode (keyboard merged with every pad),
+Escape / pad Back toggle the menu, first run fullscreen (not while `BH_INPUT_SCRIPT` is set), bindings
+written on first run and exit, `BH_AUTOSTART=1`. Launcher art: `tools/make_logo.py` (original).
+
+**F1 = RT64 developer UI + "Body Harvest HUD" panel**, in every build. Unlike Hybrid Heaven (F3DEX2),
+this game's lists are F3DEX 1.x, so the feed and rewriter were rewritten against RT64's own decoders
+(`include/bh/gbi_f3dex.h`):
+
+| F3DEX 1.x layout the walker depends on | |
+|---|---|
+| `G_MTX` 0x01 | params bits 16-23: PROJECTION 0x01, LOAD 0x02, PUSH 0x04 |
+| `G_MOVEMEM` 0x03 | type bits 16-23; viewport 0x80 |
+| `G_VTX` 0x04 | count bits 10-15, first index bits 17-23 |
+| `G_DL` 0x06 | bit 16 = branch |
+| `G_TRI1` 0xBF / `G_TRI2` 0xB1 / `G_QUAD` 0xB5 | indices ×2 at bits 17/9/1 (and 25 for the quad) |
+| `G_ENDDL` 0xB8, `G_POPMTX` 0xBD (`w1 == 0` pops one), `G_MOVEWORD` 0xBC (type bits 0-7, segment bits 10-13) | |
+| `G_TEXRECT` 0xE4/0xE5 | RT64 HLE consumes the next two commands unconditionally |
+| extended GBI hook | `G_SPNOOP` 0x00 (define nothing; `F3DEX_GBI_2` would select 0xE0) |
+
+`src/dlcensus.cpp` publishes each frame's 2D elements (identities per `include/bh/hudid.h`);
+`src/hudrewrite.cpp` applies classes live; `hud.json` in the settings folder; promote with
+`tools/promote_hud_tags.py`.
 
 ## Submodule patches
 
-Every change to a submodule is an idempotent script in `tools/`, run by
-`python tools/patch_all.py`. Rerun it after any submodule update.
+Every change to a submodule is an idempotent script in `tools/`, run by `python tools/patch_all.py`.
+Rerun it after any submodule update.
 
 | Script | Submodule | What and why |
 |---|---|---|
-| | | |
+| `patch_rsprecomp.py` | N64Recomp | RSP indirect jumps ignore the low two bits (Wave Race 64) |
+| `patch_n64recomp.py` | N64Recomp | `use_lookup_for_all_function_calls` config key (Wave Race 64) |
+| `patch_librecomp.py` | librecomp | failed lookup reports caller and thread (`bh_report_lookup_miss`) |
+| `patch_runtime_shutdown.py` + `patches/runtime-shutdown.patch` | librecomp, ultramodern | join workers before freeing RDRAM (Wave Race 64's diff for upstream `cdf5abb`; HH's diff is for the fork) |
+| `patch_recompinput.py` | recompinput | auto-assign controllers |
+| `patch_rt64_eventfilter.py` | RT64 | remove the SDL event filter on destruction |
+| `patch_rt64_inspector.py` | RT64 | port hook in the F1 UI; F2 unbound |
+| `patch_rt64_texturepacks.py` | RT64 | texture packs from mods |
+| `patch_rt64_pairing.py` | RT64 | interpolation pairing counters |
+| `patch_rt64_l3dex.py` | RT64 | L3DEX 1.x gets F3DEX's command set |
 
 ## Testing and diagnostics
 
@@ -65,19 +198,36 @@ Every change to a submodule is an idempotent script in `tools/`, run by
 
 | Variable | Effect |
 |---|---|
-| `BH_INPUT_SCRIPT` | timed input script |
-| | |
+| `BH_INPUT_SCRIPT=<file>` | timed input script (`tools/scripts/start-spam.txt`) |
+| `BH_AUTOSTART=1` | start the stored dump without the launcher |
+| `BH_DEBUG_LOADS=1` | log overlay and data loads |
+| `BH_TRACE_FUNCS=0xADDR,...` / `BH_TRACE_LIMIT=<n>` | print calls to resident/runtime functions with args and result |
+| `BH_FRAME_STATS=1` | display lists per 60 updates |
+| `BH_SAMPLE=1` | thread sampler every 2 s (`tools/symbolize_log.py` resolves it) |
+| `BH_AUDIO_STATS=1` / `BH_AUDIO_DUMP` / `BH_AUDIO_HEADROOM_MS` / `BH_AUDIO_PERIOD` / `BH_AUDIO_NO_RESAMPLE` | audio diagnostics and knobs |
+| `BH_SI_LATENCY_MS=<n>` | controller transfer latency (default 1; 0 = immediate, which stalls boot) |
+| `BH_NO_RUMBLE_PAK=1` | report an empty accessory slot |
+| `BH_PRESENT_MODE=console\|skip\|early` | RT64 presentation mode |
+| `BH_DL_CENSUS=<n>` | census of every n-th display list |
+| `BH_INSPECTOR=0` | hide the HUD panel |
+| `BH_HUD_ELEMENTS_LOG=1` / `BH_HUD_REWRITE_TRACE=1` / `BH_NO_HUD_REWRITE=1` | HUD feed/rewriter diagnostics and A/B |
+| `BH_TEST_INSPECTOR=<s>` / `BH_TEST_OPEN_SETTINGS=<tab>@<s>` / `BH_TEST_HUD_OVERRIDE` | test hooks |
+| `BH_WINDOW_SIZE=WxH` / `BH_YIELD_MS` / `BH_SKIP_DL` | window size, spin-yield wait, skip display lists |
 
-### Traps
+### Test runs
+
+- `python tools/test_sandbox.py --exe build/body-harvest-recomp.exe --rom rom.z64 --seconds 70 --grab 20,45 --out <dir> --seed tools/test-seeds/graphics.json --env BH_INPUT_SCRIPT=...`
+  runs a throwaway copy (`portable.txt`), grabs the window, keeps changed settings, deletes the copy.
+  Seed the windowed `graphics.json`, or a clean profile opens fullscreen.
+- `tools/shoot_run.ps1`, `tools/boot_runs.ps1` run the real build and **write to the real settings
+  folder**; clean up after them.
+- `tools/capture_frames.py` saved 0 frames of this window on the development laptop; `--grab` in
+  `test_sandbox.py` (GDI window grab by process id) is what worked.
 
 ---
 
 ## Keeping this current
 
-This file describes the *port*: the toolchain, the runtime, the renderer, and the
-techniques used against them. When a later change fixes something in one of
-those -- or finds that something written here is no longer true of a newer
-submodule -- update this file in the same commit that makes the change, and say
-what the symptom was. A finding without its symptom is much harder to find again.
-
-Facts about Body Harvest itself belong in [GAME-INTERNALS.md](GAME-INTERNALS.md).
+This file describes the *port*. When a later change fixes something in the toolchain, runtime or
+renderer -- or finds something here no longer true -- update this file in the same commit, with the
+symptom. Facts about Body Harvest itself belong in [GAME-INTERNALS.md](GAME-INTERNALS.md).
