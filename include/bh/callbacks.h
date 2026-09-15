@@ -49,6 +49,10 @@ size_t code_section_count();
 // game's own libultra code needs. Called by register_runtime_functions.
 void install_libultra_glue();
 
+// src/widescreen.cpp: game-side picture changes (full frame, widescreen view).
+// Called by register_runtime_functions.
+void install_widescreen();
+
 // src/calltrace.cpp: BH_TRACE_FUNCS=addr,... wraps those game addresses and prints
 // each call's arguments and result. Call from on_init after every registration.
 void install_call_traces();

@@ -147,6 +147,11 @@ as F3DEX's quad.
 
 Presentation mode: `PresentEarly` (Wave Race's; `BH_PRESENT_MODE=console|skip|early`).
 
+**Symptom: black strips at the right and bottom of gameplay, in any window.** The game renders gameplay
+into 304×230 and relies on the VI's X/Y scale to stretch it; ultramodern ignores `osViSetXScale/YScale`
+and RT64 presents without VI scale. `src/widescreen.cpp` replaces `setGameplayResolution` (`0x80006D84`)
+with the game's own `setFullResolution`, so gameplay draws 320×240 (`BH_FULL_FRAME=0`: off).
+
 ## Frontend and the F1 inspector
 
 RecompFrontend as Wave Race 64 / Hybrid Heaven: launcher (Load ROM → Start Game, Controls, Settings,
@@ -213,6 +218,7 @@ Rerun it after any submodule update.
 | `BH_HUD_ELEMENTS_LOG=1` / `BH_HUD_REWRITE_TRACE=1` / `BH_NO_HUD_REWRITE=1` | HUD feed/rewriter diagnostics and A/B |
 | `BH_TEST_INSPECTOR=<s>` / `BH_TEST_OPEN_SETTINGS=<tab>@<s>` / `BH_TEST_HUD_OVERRIDE` | test hooks |
 | `BH_WINDOW_SIZE=WxH` / `BH_YIELD_MS` / `BH_SKIP_DL` | window size, spin-yield wait, skip display lists |
+| `BH_FULL_FRAME=0` | gameplay keeps the game's 304×230 region (VI-scaled on hardware) |
 
 ### Test runs
 

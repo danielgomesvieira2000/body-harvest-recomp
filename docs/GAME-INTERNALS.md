@@ -68,6 +68,16 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
 
 ## Rendering
 
+- **Draw size:** `setFullResolution()` (`0x80006D5C`) = 320×240 for menus; `setGameplayResolution()`
+  (`0x80006D84`) = 304×230 for gameplay, with `osViSetXScale/YScale` = size/320, size/240 so the VI
+  stretches it. Viewport (`func_8000F368_FF68`: vscale = vtrans = size×2), scissor and clears derive from
+  `D_80068084`/`D_80068088` (the current size). `BH_DL_CENSUS=300` in Greece: viewport 152,115, scissor
+  0..304×0..230.
+- **Projections in gameplay:** main 3D `persp aspect 1.3333 fovy 45 near 10 far 10015.5`; a second
+  `fovy 45 near 15 far 1280.2`; HUD under ortho projections plus ~30 texture rectangles.
+- **Display-list buffers:** two, alternated per frame (`D_801CE710 - D_80031B84 * 0x22B00`); top-level
+  list at `+0x280` (`0x801CE990`).
+
 - Two microcodes per frame: F3DEX 1.21 for the scene, L3DEX 1.21 used by some lists (RT64 must know
   it; PORTING.md "Renderer").
 - Intro story text is drawn as 32×32 textured rectangles (`tex:0x0409xxxx`, F1 panel).
