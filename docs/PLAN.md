@@ -8,7 +8,8 @@ reference someone else can use goes in [PORTING.md](PORTING.md) (port facts) and
 
 **Status (2026-09-15):** 00-04 done (boots to Greece gameplay); 05, 06, 07, 08 done as far as
 measurable without a person — each awaits Daniel's playtest items (listed in its findings); 09 (Linux,
-docs, packaging) done except the Windows clean-clone build ([findings/phase-09.md](findings/phase-09.md)).
+docs, packaging) gate met: clean clones build on both platforms, packages hold no game data
+([findings/phase-09.md](findings/phase-09.md)); repository and release wait for Daniel.
 No repository or release has been created (D10). The session runs **autonomously** (Daniel: `/new-port
 Body_Harvest rom.z64 autonomous`): at each choice the recommended option is taken and logged under
 *Decisions*.

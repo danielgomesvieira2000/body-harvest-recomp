@@ -111,3 +111,26 @@ No ROM, ELF, save or extracted asset in either archive (listing checked); `git l
    `Built: build-linux/body-harvest-recomp`. The clone's executable `--identify` reports
    "This dump matches the pinned target." (A session restart interrupted the first build pass; the
    second pass finished the remaining 293 steps in the same tree.) The clone was deleted.
+
+**Windows** (`git clone <working tree> %TEMP%\bhwin`, BUILDING.md §1–4 verbatim, commit `6942e29`; the
+path bug above is not on this route, because `regenerate.sh` gets no argument):
+
+| Step | Result | Elapsed |
+|---|---|---|
+| submodules (decomp non-recursive, others recursive) + `patch_all.py` | pinned commits, patches applied | 132 s |
+| `identify_rom.py` | matches | |
+| `wsl -d Ubuntu -e bash tools/regenerate.sh` | `OK`, `3045 FUNC, 0 ABS…`, `ELF verified`, `2919 (expected 2919)` | 90 s |
+| configure + build | `body-harvest-recomp.exe` | 207 s |
+| `body-harvest-recomp.exe --identify rom.z64` | "This dump matches the pinned target." | total 430 s |
+
+The clone's exe in `test_sandbox.py` (45 s, `start-spam.txt`): audio audible, backdrop stretched, grab at
+38 s shows name entry; no crash. The clone was deleted.
+
+## Gate
+
+| Condition | Status |
+|---|---|
+| A clean clone builds with the documented commands, Linux | **met** after the `wsl_build_elf.sh` fix |
+| A clean clone builds with the documented commands, Windows | **met** |
+| Packages contain no game data | **met** (both packagers, contents listed) |
+| Repository and first release | not done: only when Daniel asks (D10) |
