@@ -99,6 +99,43 @@ frames), Play menu and the dropship cutscene. Every menu fills the window — ba
 ship behind the dimmed menus widened, buttons and letters at their own size in the middle. The dropship
 cutscene is widened with the game's own cinematic bands at the top and bottom.
 
+## Change 4 — the sky strip stretched (`BH_NO_SKY_STRETCH`)
+
+**Reported by Daniel after the first build:** "the skybox gets cut-off ... it should span the whole
+screen (spill or cover)". In a wide window the sky picture covered only the middle 4:3 of the top of the
+screen; beside it, nothing (black or a flat colour block).
+
+**Measured** (`BH_DL_CENSUS`, now printing s,t, dsdx,dtdy and the colour image per rectangle): after the
+depth clear, gameplay fills the sky colour from the horizon down (`fill 0,33..319,239`), then draws the
+panorama as 2D texture rectangles:
+
+- 32×32 tiles at dsdx 0.5, dtdy 0.666, so 64 px wide and 48 lines tall;
+- their images sit on the heap, 0x400 apart, and change as the camera turns;
+- the first and last tile of a row are cut by the yaw (e.g. x 0..17, 17..81 … 273..319);
+- the tile above the horizon is cut by the pitch (t 10, y 0..33).
+
+As 2D they are placed in the 4:3 middle.
+
+**Wrong turns kept:**
+- `drawSky?` in the decomp (`func_80070CC0`) draws the cinematic bands, not the sky. No other
+  function in the C or the asm could be tied to these commands by their constants.
+- Extending the panorama past the edges was considered, which needs the tile count to wrap. The texture's
+  MIO0 size is not a multiple of a tile (tiles are built at run time), and a turn test saw 40 images
+  but never a wrap.
+- Daniel meanwhile set the six visible tiles to `stretch` in the F1 panel of a test window. That works for
+  that view only: the identities change with the camera.
+
+**First version, partial:** `src/dlcensus.cpp` looks for a row of rectangles with equal top and bottom
+edges joining end to end from x 0 to 319 (tested on the rectangles one by one, not the panel's merged
+elements), and gives the whole row `stretch`. 16:9 grabs looking ahead: filled. Daniel, aiming at the
+sky: still 4:3 below the top band. His live session's census showed why:
+- the panorama is a **grid**, 10 columns by 4 rows of images in Greece (`0x802CA8D0`, `0x802CD0D0`,
+  `0x802CF8D0`, `0x802D20D0` start the rows);
+- looking up, the rows stack down the screen (y 0..4, 4..52, 52..100, 100..148 …);
+- the rule stopped at the first row it found.
+
+**Fix:** every full-width row in the frame is stretched. Confirmed by Daniel aiming at the sky, 16:9.
+
 ## Not yet done
 
 - HUD anchoring (radar right, weapon/health/alien bars left): through the F1 panel with Daniel.

@@ -181,6 +181,13 @@ with the game's own `setFullResolution`, so gameplay draws 320×240 (`BH_FULL_FR
 `src/dlcensus.cpp` detects a full row of them per frame and gives the tiles `stretch` through the
 inspector's per-frame class layer (`BH_NO_BG_STRETCH=1`: off).
 
+**Symptom: the sky covers only the middle 4:3 of a wide window** (black or a flat block beside it). The
+panorama is rows of 2D texture tiles on heap images that change with the camera (GAME-INTERNALS.md),
+so no fixed identity can be tagged. `src/dlcensus.cpp` finds every row of rectangles that shares top and
+bottom edges and joins end to end from x 0 to 319. It gives all of them `stretch`, testing the rectangles
+one by one, not the panel's merged elements. The first version stopped at the first row, so looking up
+left the lower rows at 4:3. `BH_NO_SKY_STRETCH=1`: off.
+
 **Symptom: terrain missing at the sides of a wide picture.** The game culls terrain tiles and entities
 against `D_8014FD2A` (full horizontal cull angle, BAM). `src/widescreen.cpp` wraps its setter
 `func_800B33BC_C236C` and stores the angle widened to the window aspect ×1.1. The setter is in the outside
@@ -249,13 +256,14 @@ Rerun it after any submodule update.
 | `BH_SI_LATENCY_MS=<n>` | controller transfer latency (default 1; 0 = immediate, which stalls boot) |
 | `BH_NO_RUMBLE_PAK=1` | report an empty accessory slot |
 | `BH_PRESENT_MODE=console\|skip\|early` | RT64 presentation mode |
-| `BH_DL_CENSUS=<n>` | census of every n-th display list |
+| `BH_DL_CENSUS=<n>` | census of every n-th display list (first 12 rectangles, with s,t, dsdx,dtdy and colour image) |
 | `BH_INSPECTOR=0` | hide the HUD panel |
 | `BH_HUD_ELEMENTS_LOG=1` / `BH_HUD_REWRITE_TRACE=1` / `BH_NO_HUD_REWRITE=1` | HUD feed/rewriter diagnostics and A/B |
 | `BH_TEST_INSPECTOR=<s>` / `BH_TEST_OPEN_SETTINGS=<tab>@<s>` / `BH_TEST_HUD_OVERRIDE` | test hooks |
 | `BH_WINDOW_SIZE=WxH` / `BH_YIELD_MS` / `BH_SKIP_DL` | window size, spin-yield wait, skip display lists |
 | `BH_FULL_FRAME=0` | gameplay keeps the game's 304×230 region (VI-scaled on hardware) |
 | `BH_NO_BG_STRETCH=1` | full-screen 32-px tile backdrops stay 4:3 |
+| `BH_NO_SKY_STRETCH=1` | the outdoor sky's tile rows stay 4:3 |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs

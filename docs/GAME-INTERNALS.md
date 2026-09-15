@@ -82,6 +82,16 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   (third-party port). Observed values: `0x2EE0`, `0x30C0`, `0x694C` with pitch.
 - **Frontend backdrops:** grids of 32×32 texture rectangles covering 320 px (title rows at y 176/208,
   intro at 192/224).
+- **Outdoor sky:** after the depth clear (fill `0xFFFC` on colour image `0x003DA800`), a sky-colour fill
+  from the horizon down, then the panorama as 2D texture rectangles. Details:
+  - 32×32 I8 tiles, dsdx 0.5 / dtdy 0.666, so 64 px by 48 lines;
+  - images on the heap 0x400 apart, a grid of 10 columns by 4 rows in Greece (rows start `0x802CA8D0`,
+    `0x802CD0D0`, `0x802CF8D0`, `0x802D20D0`);
+  - the yaw sets the first column's x and s, the pitch sets the top row's y and t, and looking up draws
+    more rows down the screen;
+  - each tile is 11 commands: SETTIMG, tile setup and LOADBLOCK, then TEXRECT with its two half-commands.
+
+  Emitting function not identified (`BH_DL_CENSUS`, docs/findings/phase-07.md change 4).
 - **Display-list buffers:** two, alternated per frame (`D_801CE710 - D_80031B84 * 0x22B00`); top-level
   list at `+0x280` (`0x801CE990`).
 

@@ -40,6 +40,8 @@ struct Rect {
     float ulx, uly, lrx, lry;
     uint32_t colour_or_image;
     int scissor;        // index into scissors
+    float s = 0, t = 0, dsdx = 0, dtdy = 0;   // texture rectangles only
+    int cimg = -1;      // index into colour_images when it was drawn
 };
 
 struct Census {
@@ -69,6 +71,7 @@ struct Census {
         bool rect;
     };
     std::vector<Element> elements;
+    std::vector<Element> hud_rects;   // texture rectangles, one entry each
     using M4 = double[4][4];
     M4 projection = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 } };
     M4 modelview[18] = {};
@@ -325,17 +328,29 @@ struct Census {
                         break;
                     }
                     rects.push_back({ 'F', ulx, uly, lrx, lry, fill_colour, current_scissor });
+                    rects.back().cimg = int(colour_images.size()) - 1;
                     break;
                 }
                 case kTexRect:
                 case kTexRectFlip:
                     if (hud) {
-                        note(texture_ident, std::string(),
-                             ((w1 >> 12) & 0xFFF) / 4.0f * to_320, ((w0 >> 12) & 0xFFF) / 4.0f * to_320,
-                             (w1 & 0xFFF) / 4.0f * to_320, (w0 & 0xFFF) / 4.0f * to_320, true);
+                        const float x0 = ((w1 >> 12) & 0xFFF) / 4.0f * to_320, x1 = ((w0 >> 12) & 0xFFF) / 4.0f * to_320;
+                        const float y0 = (w1 & 0xFFF) / 4.0f * to_320, y1 = (w0 & 0xFFF) / 4.0f * to_320;
+                        note(texture_ident, std::string(), x0, x1, y0, y1, true);
+                        // Every rectangle on its own, unmerged, for the sky-strip test.
+                        if (hud_rects.size() < 512) hud_rects.push_back({ texture_ident, std::string(), x0, x1, y0, y1, true });
                     }
-                    else rects.push_back({ 'T', ((w1 >> 12) & 0xFFF) / 4.0f, (w1 & 0xFFF) / 4.0f,
-                                      ((w0 >> 12) & 0xFFF) / 4.0f, (w0 & 0xFFF) / 4.0f, image, current_scissor });
+                    else {
+                        rects.push_back({ 'T', ((w1 >> 12) & 0xFFF) / 4.0f, (w1 & 0xFFF) / 4.0f,
+                                          ((w0 >> 12) & 0xFFF) / 4.0f, (w0 & 0xFFF) / 4.0f, image, current_scissor });
+                        rects.back().cimg = int(colour_images.size()) - 1;
+                        // s,t (10.5) and dsdx,dtdy (5.10), from the two commands that follow.
+                        const uint32_t st = word(rdram, pc + 4), dd = word(rdram, pc + 12);
+                        rects.back().s = int16_t(st >> 16) / 32.0f;
+                        rects.back().t = int16_t(st) / 32.0f;
+                        rects.back().dsdx = int16_t(dd >> 16) / 1024.0f;
+                        rects.back().dtdy = int16_t(dd) / 1024.0f;
+                    }
                     // RT64's HLE texrect consumes the next two commands (s,t and
                     // dsdx,dtdy) whatever they are.
                     pc += 16;
@@ -377,10 +392,60 @@ bool is_grid_tile(float x0, float x1, float y0, float y1) {
     return std::fabs(cx - std::round(cx)) < 0.02f && std::fabs(cy - std::round(cy)) < 0.04f;
 }
 
+// The outdoor sky (docs/findings/phase-07.md, "The sky strip"): after the sky
+// colour fill, gameplay draws the sky panorama as one row of texture rectangles
+// -- 64-px tiles of 32x32 texels, the first and last cut by the camera's yaw,
+// e.g. x 0..17, 17..81, ... 273..319 at y 0..33 -- whose images live on the heap
+// and change as the camera turns, so no fixed identity can name them. As 2D they
+// cover only the middle 4:3 of a wide window, with nothing drawn beside them. A
+// row of rectangles sharing their top and bottom edges and joining end to end
+// from x 0 to the right edge is that strip: all of it gets the stretch class.
+// Tested on the rectangles one by one: two tiles with the same content share an
+// identity, and the merged element would span both.
+// BH_NO_SKY_STRETCH=1 turns it off.
+bool sky_stretch_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_SKY_STRETCH");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
+// Every such row in the frame: looking up, the panorama is several rows of 48-line
+// tiles stacked down the screen (a 10-by-4 grid of 32x32 images in Greece), and
+// each row is its own chain. The first version stopped at the first row found,
+// which left the rows below it at 4:3 (Daniel, aiming at the sky).
+template <typename Element>
+std::vector<const Element*> full_width_rows(const std::vector<Element>& elements) {
+    std::vector<const Element*> rows, row;
+    for (const auto& e : elements) {
+        if (e.x0 <= 0.5f && e.x1 - e.x0 <= 64.5f && e.y1 - e.y0 >= 2.0f) {
+            row.clear();
+            row.push_back(&e);
+            // Follow the chain rightwards: the next rectangle starts where this one ends.
+            for (bool extended = true; extended && row.back()->x1 < 319.0f;) {
+                extended = false;
+                for (const auto& n : elements) {
+                    if (&n != row.back() && std::fabs(n.x0 - row.back()->x1) <= 0.5f &&
+                        std::fabs(n.y0 - e.y0) <= 0.5f && std::fabs(n.y1 - e.y1) <= 0.5f &&
+                        n.x1 - n.x0 <= 64.5f && n.x1 > n.x0) {
+                        row.push_back(&n);
+                        extended = true;
+                        break;
+                    }
+                }
+            }
+            if (row.size() >= 4 && row.back()->x1 >= 319.0f) rows.insert(rows.end(), row.begin(), row.end());
+        }
+    }
+    return rows;
+}
+
 void per_frame(uint8_t* rdram, uint32_t list_address) {
     const bool panel = bh::inspector::enabled();
     const bool backgrounds = background_stretch_enabled();
-    if (!panel && !backgrounds) return;
+    const bool sky = sky_stretch_enabled();
+    if (!panel && !backgrounds && !sky) return;
 
     Census c{ rdram };
     c.hud = true;
@@ -410,6 +475,22 @@ void per_frame(uint8_t* rdram, uint32_t list_address) {
                 std::fprintf(stderr, "[bh] first full-screen tile background: %zu tiles stretched (BH_NO_BG_STRETCH=1: off)\n",
                              frame_classes.size());
                 std::fflush(stderr);
+            }
+        }
+    }
+    if (sky) {
+        const auto tiles = full_width_rows(c.hud_rects);
+        if (!tiles.empty()) {
+            for (const auto* e : tiles) frame_classes[e->identity] = bh::inspector::kStretch;
+            static float deepest = 0.0f;
+            for (const auto* e : tiles) {
+                if (e->y1 > deepest + 40.0f) {
+                    deepest = e->y1;
+                    std::fprintf(stderr, "[bh] full-width sky rows reaching y %.0f: %zu tiles stretched (BH_NO_SKY_STRETCH=1: off)\n",
+                                 deepest, tiles.size());
+                    std::fflush(stderr);
+                    break;
+                }
             }
         }
     }
@@ -481,12 +562,16 @@ void run(const uint8_t* rdram, uint32_t list_address) {
         std::fprintf(stderr, "[bh-dl]   projection %zu: %s (%d tris)\n", i, c.projections[i].c_str(),
                      i < c.tris_under_projection.size() ? c.tris_under_projection[i] : 0);
     }
-    const size_t shown = c.rects.size() < 40 ? c.rects.size() : 40;
+    const size_t shown = c.rects.size() < 12 ? c.rects.size() : 12;
     for (size_t i = 0; i < shown; ++i) {
         const Rect& r = c.rects[i];
-        std::fprintf(stderr, "[bh-dl]   %s %.1f,%.1f..%.1f,%.1f %s 0x%08X scissor %d\n",
+        std::fprintf(stderr, "[bh-dl]   %s %.1f,%.1f..%.1f,%.1f %s 0x%08X scissor %d cimg %d",
                      r.kind == 'F' ? "fill" : "tex ", r.ulx, r.uly, r.lrx, r.lry,
-                     r.kind == 'F' ? "colour" : "image", r.colour_or_image, r.scissor);
+                     r.kind == 'F' ? "colour" : "image", r.colour_or_image, r.scissor, r.cimg);
+        if (r.kind == 'T') {
+            std::fprintf(stderr, " st %.2f,%.2f d %.4f,%.4f", r.s, r.t, r.dsdx, r.dtdy);
+        }
+        std::fprintf(stderr, "\n");
     }
     if (c.rects.size() > shown) {
         std::fprintf(stderr, "[bh-dl]   ... %zu more rects\n", c.rects.size() - shown);
