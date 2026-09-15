@@ -6,13 +6,18 @@ under *Departures* rather than rewriting the text. What was found goes in [findi
 reference someone else can use goes in [PORTING.md](PORTING.md) (port facts) and
 [GAME-INTERNALS.md](GAME-INTERNALS.md) (game facts).
 
-**Status:** plan written 2026-09-15. The session runs **autonomously** (Daniel: `/new-port
+**Status:** phases 00-04 done 2026-09-15 (boots to Greece gameplay); 05 measured, awaiting Daniel's
+playtest; 06 next. The session runs **autonomously** (Daniel: `/new-port
 Body_Harvest rom.z64 autonomous`): at each choice the recommended option is taken and logged under
 *Decisions*.
 
 > **Departures from this plan** (added as they happen):
 >
-> - *(none yet)*
+> - *Phase 05 → 06 order*: phase 05's exit is a playtest by Daniel (rumble, pitch, a building, a level
+>   change). Everything measurable without him is done ([findings/phase-05.md](findings/phase-05.md)).
+>   Phase 06 starts before that gate so the playtest uses the real launcher and settings; the phase 05
+>   checks are asked for together with phase 06's. (Autonomous session, 2026-09-15; Hybrid Heaven took
+>   the same departure.)
 
 ## Goal
 
