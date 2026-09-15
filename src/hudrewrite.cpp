@@ -26,6 +26,87 @@ using namespace bh::gbi;
 constexpr uint32_t kScratch[2] = { 0x00700000u, 0x00740000u };
 constexpr uint32_t kScratchSize = 0x40000u;
 
+// ---- the player's model ------------------------------------------------------
+//
+// Adam is one call to a static model list (0x010031E0; Black Adam 0x050408F0)
+// made after three matrices of the caller's: a base scale, his position and
+// heading, and the root pose (decomp F9230.c func_800EF14C). Inside, the torso is
+// drawn under those, then every other part pushes and multiplies a bone matrix
+// from segment 7 -- `G_MTX 0x04 0x07000000 + 0x40 n`, fifteen of them built per
+// frame by func_8000CC3C -- draws, and pops back up the chain
+// (docs/findings/phase-08.md, "The player model").
+//
+// RT64 pairs each part with a part of the previous frame by the draw call's
+// signature and the nearest position. Similar parts tie, a part takes another's
+// previous pose or finds none, and the part is drawn a frame's motion away from
+// the rest before snapping back: the model jitters while the world glides
+// (Daniel; playbook 09, the Wave Race riders). So, as there, each part is paired
+// by identity: an explicit group id per bone -- the bone matrix's segmented
+// address, which stays put while segment 7's base moves every frame -- with
+// linear ordering and the translation always interpolated, so a paired part never
+// decides on its own to snap. The torso has no bone matrix of its own; a
+// multiply by identity under the torso's id at the start of the model gives it
+// one. After the model RT64's defaults are put back. BH_NO_MODEL_IDS=1: off.
+constexpr uint32_t kAdamModel = 0x010031E0u;
+constexpr uint32_t kBlackAdamModel = 0x050408F0u;
+constexpr uint32_t kIdentityMtx = 0x00780000u;   // scratch (PORTING.md, scratch RDRAM)
+constexpr uint32_t kTorsoBone = 0x07FFFFC0u;     // the torso's id key: no real bone address
+
+bool model_ids_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_MODEL_IDS");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
+uint32_t model_id(uint32_t model, uint32_t bone_segmented) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (uint32_t v : { bone_segmented, model, 0x4144414Du }) {
+        for (int i = 0; i < 4; ++i) {
+            h ^= (v >> (8 * i)) & 0xFF;
+            h *= 0x100000001B3ull;
+        }
+    }
+    // Top bit set: never G_EX_ID_IGNORE (0); never G_EX_ID_AUTO (~0).
+    const uint32_t id = static_cast<uint32_t>(h ^ (h >> 32)) | 0x80000000u;
+    return id == G_EX_ID_AUTO ? 0xFFFFFFFEu : id;
+}
+
+void write_identity(uint8_t* rdram) {
+    // Fixed-point Mtx: eight words of integer halves, eight of fractions.
+    const uint32_t words[16] = { 0x00010000u, 0, 1, 0, 0, 0x00010000u, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+    std::memcpy(rdram + kIdentityMtx, words, sizeof words);
+}
+
+// ---- the player's shadow -------------------------------------------------------
+//
+// The shadow under the player is a five-vertex quad (four corners and a centre at
+// his x,z) whose vertices the game computes in world coordinates every frame and
+// draws under the world matrix every shadow shares (decomp F7870.c
+// func_800E988C). That matrix never moves, so RT64 pairs the transform as still
+// and the shadow steps at the game's 20 frames while the player glides
+// (Daniel, after the model fix; the Wave Race sky/water pattern, playbook 09).
+// The quad is always the same five points in the same order, so its vertices
+// are interpolated by index: an identity multiply opens a transform of its own
+// under an explicit id with vertex interpolation and linear ordering, and another
+// closes it after its triangles. It is found as the five-vertex quad whose centre
+// is near the player's position (the instance D_80052B34 points at), which also
+// follows him into a vehicle. A move of more than kShadowTeleport units in one game frame
+// is drawn at its new place. BH_NO_SHADOW_INTERP=1: off.
+constexpr uint32_t kPlayerInstancePtr = 0x00052B34u;
+constexpr uint32_t kShadowId = 0x5348444Fu;          // "SHDO": top bit clear, not IGNORE/AUTO, not a model id
+constexpr int kShadowTeleport = 400;
+constexpr int kShadowNear = 96;
+
+bool shadow_interp_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_SHADOW_INTERP");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
 int class_of(const std::string& identity) {
     return bh::inspector::class_for(identity.c_str());
 }
@@ -57,6 +138,59 @@ struct Writer {
     uint32_t fill_colour = 0;
     std::string texture_ident;
     int applied = 0;
+    uint32_t model = 0;         // the player model being copied, or 0
+    int models = 0;
+    bool have_player = false;
+    int16_t player_x = 0, player_z = 0;
+    bool shadow_open = false;
+    int shadows = 0;
+    bool shadow_teleported = false;
+
+    // Vertex interpolation for the shadow; G_EX_ID_AUTO puts RT64's defaults back.
+    void shadow_group(uint32_t id, bool interpolate_vertices) {
+        const bool on = id != G_EX_ID_AUTO;
+        const uint32_t v = (on && interpolate_vertices) ? G_EX_COMPONENT_INTERPOLATE : G_EX_COMPONENT_SKIP;
+        if (GfxCommand* cmd = reserve(2)) {
+            gEXMatrixGroup(cmd, id, G_EX_INTERPOLATE_DECOMPOSE, G_EX_NOPUSH, 0,
+                           G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO,
+                           G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO, v, G_EX_COMPONENT_AUTO,
+                           on ? G_EX_ORDER_LINEAR : G_EX_ORDER_AUTO, G_EX_EDIT_NONE,
+                           G_EX_ASPECT_AUTO, G_EX_COMPONENT_SKIP, G_EX_COMPONENT_AUTO);
+        }
+        emit((static_cast<uint32_t>(kMtx) << 24) | 0x40u, 0x80000000u | kIdentityMtx);
+    }
+
+    // Whether a vertex load is the player's shadow quad: five vertices, the fifth
+    // the centre of the four corners, near the player. Near, not at: by the time
+    // the list is submitted the game has moved him on, and walking the centre was
+    // measured 10-14 units behind the position read here.
+    bool is_player_shadow(uint32_t w0, uint32_t w1) const {
+        if (!have_player || ((w0 >> 10) & 0x3F) != 5 || ((w0 >> 17) & 0x7F) != 0) return false;
+        const uint32_t at = physical(w1);
+        int sx = 0, sz = 0;
+        for (int i = 0; i < 4; ++i) {
+            sx += static_cast<int16_t>(read_word(rdram, at + 16 * i) >> 16);
+            sz += static_cast<int16_t>(read_word(rdram, at + 16 * i + 4) >> 16);
+        }
+        const int cx = static_cast<int16_t>(read_word(rdram, at + 64) >> 16);
+        const int cz = static_cast<int16_t>(read_word(rdram, at + 68) >> 16);
+        return std::abs(sx / 4 - cx) <= 2 && std::abs(sz / 4 - cz) <= 2 &&
+               std::abs(cx - player_x) < kShadowNear && std::abs(cz - player_z) < kShadowNear;
+    }
+
+    // RT64's defaults in every field but the id, the ordering and the translation;
+    // with G_EX_ID_AUTO it puts the defaults back entirely (Wave Race 64).
+    void model_group(uint32_t id) {
+        const bool on = id != G_EX_ID_AUTO;
+        if (GfxCommand* cmd = reserve(2)) {
+            gEXMatrixGroup(cmd, id, G_EX_INTERPOLATE_DECOMPOSE, G_EX_NOPUSH, 0,
+                           on ? G_EX_COMPONENT_INTERPOLATE : G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO,
+                           G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO, G_EX_COMPONENT_AUTO,
+                           G_EX_COMPONENT_SKIP, G_EX_COMPONENT_AUTO,
+                           on ? G_EX_ORDER_LINEAR : G_EX_ORDER_AUTO, G_EX_EDIT_NONE,
+                           G_EX_ASPECT_AUTO, G_EX_COMPONENT_SKIP, G_EX_COMPONENT_AUTO);
+        }
+    }
 
     uint32_t physical(uint32_t address) const {
         if ((address >> 24) >= 0x80) return address & 0x1FFFFFFF;
@@ -215,7 +349,19 @@ struct Writer {
             const uint32_t w1 = read_word(rdram, pc + 4);
             const uint8_t op = static_cast<uint8_t>(w0 >> 24);
             pc += 8;
+            if (shadow_open && op != kTri1 && op != kTri2 && op != kQuad) {
+                shadow_group(G_EX_ID_AUTO, false);
+                shadow_open = false;
+            }
             switch (op) {
+                case kVtx:
+                    if (!shadow_open && model == 0 && shadow_interp_enabled() && is_player_shadow(w0, w1)) {
+                        shadow_group(kShadowId, !shadow_teleported);
+                        shadow_open = true;
+                        ++shadows;
+                    }
+                    emit(w0, w1);
+                    break;
                 case kEndDl:
                     if (branch_cls != bh::inspector::kAuto) group_end(branch_cls);
                     emit(w0, w1);
@@ -242,6 +388,15 @@ struct Writer {
                     const int cls = depth < 10 ? class_of(id) : bh::inspector::kAuto;
                     trace_seen(id, "call", cls);
                     uint32_t callee = w1;
+                    const bool player = model == 0 && depth < 10 && model_ids_enabled() &&
+                                        (w1 == kAdamModel || w1 == kBlackAdamModel);
+                    if (player) {
+                        model = w1;
+                        ++models;
+                        // The torso's own transform: identity, under the torso's id.
+                        model_group(model_id(model, kTorsoBone));
+                        emit((static_cast<uint32_t>(kMtx) << 24) | 0x40u, 0x80000000u | kIdentityMtx);
+                    }
                     if (depth < 10) {
                         // Reserve a jump over the callee's copy.
                         const uint32_t jump_at = used;
@@ -260,6 +415,10 @@ struct Writer {
                     emit(w0, callee);
                     enable();
                     group_end(cls);
+                    if (player) {
+                        model_group(G_EX_ID_AUTO);
+                        model = 0;
+                    }
                     if (cls != bh::inspector::kAuto) ++applied;
                     break;
                 }
@@ -282,6 +441,10 @@ struct Writer {
                         have_projection = true;
                         projection_w0 = w0;
                         projection_w1 = w1;
+                    }
+                    else if (model != 0 && (w1 >> 24) == 0x07) {
+                        // A bone of the player model: its own id (see model_id above).
+                        model_group(model_id(model, w1));
                     }
                     emit(w0, w1);
                     break;
@@ -352,10 +515,25 @@ uint32_t rewrite(uint8_t* rdram, uint32_t list_address) {
         const char* v = std::getenv("BH_NO_HUD_REWRITE");
         return v != nullptr && *v != '\0' && *v != '0';
     }();
-    if (off || !bh::inspector::any_classes()) return 0;
+    if (off || (!bh::inspector::any_classes() && !model_ids_enabled())) return 0;
 
+    write_identity(rdram);
     g_turn ^= 1;
     Writer w{ rdram, kScratch[g_turn], kScratchSize };
+
+    // The player's position, for finding his shadow (see shadow_interp_enabled).
+    const uint32_t player = read_word(rdram, kPlayerInstancePtr);
+    if ((player >> 24) == 0x80 && (player & 0x1FFFFFFF) < 0x7FFFF8) {
+        w.have_player = true;
+        w.player_x = static_cast<int16_t>(read_word(rdram, player & 0x1FFFFFFF) >> 16);
+        w.player_z = static_cast<int16_t>(read_word(rdram, (player & 0x1FFFFFFF) + 4) >> 16);
+        static int16_t last_x = 0, last_z = 0;
+        static bool had_last = false;
+        w.shadow_teleported = !had_last || std::abs(w.player_x - last_x) + std::abs(w.player_z - last_z) > kShadowTeleport;
+        last_x = w.player_x;
+        last_z = w.player_z;
+        had_last = true;
+    }
     const uint32_t copy = w.copy_list(list_address, 0);
     static bool reported_overflow = false;
     if (w.overflow || copy == 0) {
@@ -366,6 +544,30 @@ uint32_t rewrite(uint8_t* rdram, uint32_t list_address) {
             std::fflush(stderr);
         }
         return 0;
+    }
+    // BH_SHADOW_TRACE=1: in how many of the last 100 gameplay lists the shadow was found.
+    static const bool shadow_trace = std::getenv("BH_SHADOW_TRACE") != nullptr;
+    if (shadow_trace && w.have_player) {
+        static int lists = 0, found = 0;
+        ++lists;
+        found += w.shadows > 0 ? 1 : 0;
+        if (lists == 100) {
+            std::fprintf(stderr, "[bh] player shadow found in %d of 100 lists\n", found);
+            std::fflush(stderr);
+            lists = found = 0;
+        }
+    }
+    static bool reported_shadow = false;
+    if (w.shadows > 0 && !reported_shadow) {
+        reported_shadow = true;
+        std::fprintf(stderr, "[bh] player shadow: vertices interpolated (BH_NO_SHADOW_INTERP=1: off)\n");
+        std::fflush(stderr);
+    }
+    static bool reported_model = false;
+    if (w.models > 0 && !reported_model) {
+        reported_model = true;
+        std::fprintf(stderr, "[bh] player model: parts paired by identity (BH_NO_MODEL_IDS=1: off)\n");
+        std::fflush(stderr);
     }
     static int reported = 0;
     if (w.applied > 0 && reported < 3) {

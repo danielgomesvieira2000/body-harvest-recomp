@@ -53,7 +53,65 @@ the evidence.
 - A display above 60 Hz.
 - Cost on the Iris Xe at 60 presented frames.
 
+## The player model (after Daniel's first look)
+
+**Reported:** "The player model during gameplay must get a fixed interpolation on the model itself, it
+looks jittery."
+
+**How the game draws him** (decomp F9230.c `func_800EF14C`, confirmed by dumping the list):
+- three matrices, a base scale (LOAD), position and heading (MUL), root pose (MUL);
+- segment 7 set to fifteen bone matrices built this frame (`func_8000CC3C`);
+- `gSPDisplayList(0x010031E0)` (Black Adam `0x050408F0`). Inside it the torso list is drawn under the
+  caller's matrices. Then each part is `G_MTX 0x04` (modelview, multiply, push) of
+  `0x07000000 + 0x40·n`, the part's list, and pops back up the chain (`BD`).
+
+Every part is its own transform, paired by RT64's call signature and nearest position: the Wave Race
+riders' case (playbook 09).
+
+**Fix** (`src/hudrewrite.cpp`):
+- The model call is inlined, and an explicit `gEXMatrixGroup` goes before each bone matrix: id from the
+  bone's segmented address and the model, `G_EX_ORDER_LINEAR`, decomposed, translation always interpolated.
+- The torso gets its own transform: a multiply by an identity matrix (scratch `0x80780000`) under the
+  torso's id at the start of the model.
+- RT64's defaults are restored after the call.
+- The rewriter now runs every frame when this is on, not only when a 2D class is set.
+
+**Verified by Daniel watching two scripted runs** (`walk-greece.txt`, 16:9):
+- with ids the model was steady; with `BH_NO_MODEL_IDS=1` it jittered;
+- `BH_PAIRING` counters were no guide: 1.1–2.0 unpaired a frame both ways (the defect is wrong pairs, which count as paired).
+
+## The player's shadow
+
+**Reported next:** the shadow under the player jitters.
+
+**How the game draws it** (decomp F7870.c `func_800E988C`): a quad of five vertices (four corners and
+the centre) computed in world coordinates every frame, loaded with `gSPVertex(5)` and drawn with two
+`gSP2Triangles`. It sits under the world matrix every shadow shares. That matrix never moves, so the
+geometry steps at 20 frames while the player glides (playbook 09, Wave Race's sky and water).
+
+**Fix:**
+- The quad gets a transform of its own: identity multiply, then a group with vertex interpolation
+  (`G_EX_COMPONENT_INTERPOLATE`), linear ordering and a fixed id.
+- Another identity multiply under RT64's defaults closes it after the triangles.
+- The quad is the same five points in the same order every frame, so pairing vertices by index is sound.
+- A move over 400 units in one game frame is not interpolated.
+
+**First attempt, wrong (kept):**
+- It found the quad by its centre being exactly the player's position (`*D_80052B34`). Daniel saw no
+  change in either run.
+- A trace of small vertex loads near the player showed why. Standing, the centre matched. Walking, it
+  trailed the position read at submission by 10–14 units, because the game has already moved him on by
+  then. So the match held only while he stood still.
+- The one-time "found" log line had come from a standing frame.
+
+**Second attempt:** a five-vertex load whose fifth vertex is the mean of the four corners (±2), within 96
+units of the player. `BH_SHADOW_TRACE=1`: found in 100 of 100 lists, walking and turning. Daniel:
+the jitter is gone with it and back with `BH_NO_SHADOW_INTERP=1`.
+
+**Not covered yet:** other characters' and vehicles' models and shadows (same two mechanisms; aliens and
+civilians go through `func_8007C044` and the same shadow function).
+
 ## Consequence for the plan
 
-No matrix groups are emitted. If Daniel sees an artefact, the pairing log and ids go where it is seen
-(playbook 09), not everywhere.
+No matrix groups were emitted at first; ids went where Daniel saw an artefact (playbook 09), not
+everywhere: the player model and his shadow (sections above).

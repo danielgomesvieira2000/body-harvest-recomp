@@ -92,6 +92,19 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   - each tile is 11 commands: SETTIMG, tile setup and LOADBLOCK, then TEXRECT with its two half-commands.
 
   Emitting function not identified (`BH_DL_CENSUS`, docs/findings/phase-07.md change 4).
+- **Player model:** `func_800EF14C_FE0FC` (outside overlay).
+  - Before the call it loads a base scale, multiplies position and heading (`D_80052B34` instance) and
+    multiplies the root pose, then sets segment 7 to fifteen bone matrices from `func_8000CC3C_D83C`
+    and calls `0x010031E0` (Black Adam `0x050408F0`).
+  - Inside the model: the torso list under those matrices, then per part `G_MTX` modelview|mul|push of
+    `0x07000000 + 0x40·n`, the part list, and `G_POPMTX` back up the chain.
+- **Player position:** `D_80052B34` points at his `VehicleInstance`, x at +0 and z at +4 (s16), also
+  while on foot. By the time a frame's list is submitted the next frame's movement has already been
+  applied (walking: 10–14 units ahead of what the list drew).
+- **Shadows:** `func_800E988C_F883C` per vehicle/character. The shadow is a five-vertex quad (corners
+  ± rotated half-extents, centre last, heights from the terrain), built in world coordinates in the
+  frame's vertex buffer, drawn with `gSPVertex(5)` and two `gSP2Triangles` under the shared world
+  matrix. Texture `0x05000000` when on foot.
 - **Display-list buffers:** two, alternated per frame (`D_801CE710 - D_80031B84 * 0x22B00`); top-level
   list at `+0x280` (`0x801CE990`).
 

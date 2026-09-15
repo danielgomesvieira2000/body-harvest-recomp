@@ -101,6 +101,7 @@ left out. Differences that matter:
 | Range | Use |
 |---|---|
 | `0x80700000`–`0x80780000` | HUD rewriter copies (two 256 KB buffers) |
+| `0x80780000`–`0x80780040` | identity matrix the rewriter's model and shadow groups multiply by |
 | `0x807EF000`–`0x807EF064` | controller-latency timer + queue |
 | `0x807F0000`–`0x80800000` | audio command-list private copy |
 
@@ -264,6 +265,8 @@ Rerun it after any submodule update.
 | `BH_FULL_FRAME=0` | gameplay keeps the game's 304×230 region (VI-scaled on hardware) |
 | `BH_NO_BG_STRETCH=1` | full-screen 32-px tile backdrops stay 4:3 |
 | `BH_NO_SKY_STRETCH=1` | the outdoor sky's tile rows stay 4:3 |
+| `BH_NO_MODEL_IDS=1` | the player model's parts are left to RT64's own pairing |
+| `BH_NO_SHADOW_INTERP=1` / `BH_SHADOW_TRACE=1` | the player's shadow steps at the game's rate / how often it is found |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs
@@ -291,9 +294,23 @@ scripts.
 
 ### Frame interpolation
 
-RT64 interpolates with no port-side matrix groups: gameplay 20 game frames/s presented at 60, about one
-unpaired transform per frame (`BH_PAIRING=1`); `frame_motion.py` on a burst while walking: 90 % of pairs
-change under Framerate Display vs 47 % under Original (docs/findings/phase-08.md).
+Gameplay runs 20 game frames/s, presented at 60, with about one unpaired transform per frame
+(`BH_PAIRING=1`). `frame_motion.py` on a burst while walking: 90 % of pairs change under Framerate
+Display vs 47 % under Original (docs/findings/phase-08.md). Port-side groups go only where an artefact
+was seen, both in `src/hudrewrite.cpp`:
+
+**Symptom: the player model jitters while the world glides.** Adam's parts are separate transforms (bone
+matrices pushed from segment 7 inside `0x010031E0`), and RT64's signature/nearest pairing mixes them up.
+Fix: the model call is inlined, and before each bone matrix goes a group with an id from its segmented
+address, linear order and translation always interpolated. An identity multiply under its own id gives
+the torso a transform. `BH_NO_MODEL_IDS=1`: off. A pairing counter does not show this defect.
+
+**Symptom: the player's shadow jitters.** It is a five-vertex quad rebuilt in world coordinates under the
+shared world matrix, so RT64 sees a still transform. Fix: identity multiplies wrap it in a transform of
+its own, with vertex interpolation, linear order and a fixed id. It is found as a five-vertex load whose
+fifth vertex is the corners' mean, within 96 units of the player. It is *near*, not *at*, his position:
+by submission the game has moved him 10–14 units on. `BH_NO_SHADOW_INTERP=1`: off; `BH_SHADOW_TRACE=1`
+reports how often it is found.
 
 ---
 
