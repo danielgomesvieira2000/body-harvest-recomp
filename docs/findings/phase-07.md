@@ -180,6 +180,7 @@ game's display list before the call and an end marker after it:
 ## Not yet done
 
 - HUD anchoring beyond the radar, bars and weapon panel (e.g. dialogue boxes, scanner text): none requested yet.
-- Whether the cutscene's top/bottom bands should stay (the game draws them; "no black bars" allows an
-  original letterbox only if Daniel says so).
+- ~~Whether the cutscene's top/bottom bands should stay~~ **Decided by Daniel (2026-09-15): keep
+  them.** They are the game's own cinematic letterbox (the "no black bars" exception for an original
+  letterbox).
 - Buildings (`inside` overlay) and vehicles' own culls at wide aspects.

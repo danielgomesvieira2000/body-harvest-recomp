@@ -131,8 +131,9 @@ It is the shadow's case: geometry rebuilt under an unchanging matrix, stepping a
 
 **Verified:** Daniel, aiming around: "The crosshair fix worked."
 
-**Not covered yet:** other characters' and vehicles' models and shadows (same two mechanisms; aliens and
-civilians go through `func_8007C044` and the same shadow function).
+**Not covered:** other characters' and vehicles' models and shadows (same two mechanisms; aliens and
+civilians go through `func_8007C044` and the same shadow function). Daniel, in play (2026-09-15): "so
+far they don't seem to be a problem". Left as RT64 pairs them unless an artefact is seen.
 
 ## Consequence for the plan
 
