@@ -1,4 +1,4 @@
-# {{GAME_TITLE}}: Recompiled X.Y.Z
+# Body Harvest: Recompiled X.Y.Z
 
 Added:
 
@@ -12,5 +12,5 @@ Not tested:
 
 - 
 
-You need your own dump of **{{ROM_NAME}}**. Windows: unzip and run
-`{{EXE_NAME}}.exe`. Linux: extract and run `./{{EXE_NAME}}.sh`.
+You need your own dump of **Body Harvest (USA)**. Windows: unzip and run
+`body-harvest-recomp.exe`. Linux: extract and run `./body-harvest-recomp.sh`.

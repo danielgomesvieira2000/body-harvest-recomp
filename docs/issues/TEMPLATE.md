@@ -25,8 +25,8 @@ settles it more cheaply than reasoning about the renderer.
 The level or mode, and how to reach this exact spot.
 
 A save parked just before it is worth more than any description: copy it out of
-the port's settings folder (`%LOCALAPPDATA%\{{EXE_NAME}}` on Windows) and drop it
-beside this file. A scripted-input file (`{{ENV_PREFIX}}_INPUT_SCRIPT`) that
+the port's settings folder (`%LOCALAPPDATA%\body-harvest-recomp` on Windows) and drop it
+beside this file. A scripted-input file (`BH_INPUT_SCRIPT`) that
 reaches it is even better.
 
 ## Is it stable?

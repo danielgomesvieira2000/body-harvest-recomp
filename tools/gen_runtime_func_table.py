@@ -1,0 +1,161 @@
+"""Register runtime-provided libultra functions in the address lookup.
+
+With use_lookup_for_all_function_calls, every call becomes a lookup by address
+against whatever is loaded. That is what makes overlay dispatch work, but it
+changes the rules for the libultra functions the runtime supplies: N64Recomp
+renames those to <name>_recomp and never puts them in a section table, because
+with direct calls the generated code referenced them by symbol and no address
+lookup was involved. Once every call is an address lookup, they are invisible:
+
+    Failed to find function at 0x800C6300      (osDpSetStatus)
+
+The fix is to register each of them at the address it occupied on the cartridge,
+which is what librecomp's add_loaded_function does.
+
+Only functions the generated code actually calls are registered. Declaring an
+unused function costs nothing, but taking its address forces the linker to find
+a definition, and most of the 440 names on N64Recomp's lists have none here.
+Scanning for real call sites keeps the table to what genuinely exists.
+
+Run from the repository root, after the recompiler:
+    python tools/gen_runtime_func_table.py
+"""
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from toolchain import readelf_command
+
+REPO = Path(__file__).resolve().parent.parent
+GENERATED = REPO / "RecompiledFuncs"
+OUT = GENERATED / "runtime_funcs.inl"
+# ---- port config -----------------------------------------------------------
+ELF = "elf/body-harvest.us.elf"               # the assembled ELF, relative to the repo root
+CONFIG = REPO / "recomp" / "body-harvest.us.toml"  # the N64Recomp config holding `ignored`
+# ----------------------------------------------------------------------------
+
+
+def defined_recomp_functions():
+    """Base names of <name>_recomp functions that actually have a definition.
+
+    Scanning the generated code for call sites does not work here: with
+    use_lookup_for_all_function_calls there are no direct _recomp calls left --
+    every call is an address lookup, which is the whole reason this table is
+    needed. So the list comes from the definitions instead, which is the more
+    truthful source anyway. Referencing a name with no definition would be a
+    link error, and most of the 440 names on N64Recomp's lists have none.
+    """
+    sources = list((REPO / "lib/N64ModernRuntime/librecomp/src").glob("*.cpp"))
+    sources += list((REPO / "src").glob("*.cpp"))
+
+    names = set()
+    # Both spellings occur in librecomp: `(uint8_t* rdram, ...)` and
+    # `(RDRAM_ARG recomp_context* ctx)` (pi.cpp's osPiStartDma, among others).
+    # Missing the second leaves those functions unregistered, so the first call
+    # to one is a lookup miss.
+    pattern = re.compile(r"\bvoid\s+(\w+)_recomp\s*\(\s*(?:uint8_t\s*\*|RDRAM_ARG\b)")
+    for path in sources:
+        names.update(pattern.findall(path.read_text(errors="replace")))
+    return names
+
+
+def patched_functions():
+    """Functions we replace outright, defined under their own game names.
+
+    A function marked `ignored` is not emitted by the recompiler, so it is
+    absent from the section tables. With every call resolved by address, its
+    callers then fail to find it -- replacing game_dma_copy produced exactly
+    that: "Failed to find function at 0x80097EC8", which is game_dma_copy.
+
+    Only names that are both marked `ignored` in the config and actually defined
+    in patches/ or src/ are returned. func_800CB0A8, for instance, is ignored
+    because ultramodern owns that whole routine; nothing here defines it, and
+    registering a name with no definition would not link.
+    """
+    config = CONFIG
+    if not config.exists():
+        return set()
+    block = re.search(r"^ignored\s*=\s*\[(.*?)\]", config.read_text(), re.S | re.M)
+    if not block:
+        return set()
+    ignored = set(re.findall(r'"([A-Za-z_]\w*)"', block.group(1)))
+
+    defined = set()
+    pattern = re.compile(r"\bvoid\s+(\w+)\s*\(\s*uint8_t\s*\*\s*rdram\s*,\s*recomp_context")
+    for path in list((REPO / "patches").glob("*.cpp")) + list((REPO / "src").glob("*.cpp")):
+        defined.update(pattern.findall(path.read_text(errors="replace")))
+
+    return ignored & defined
+
+
+def symbol_addresses():
+    out = subprocess.run(
+        readelf_command() + ["-sW", ELF],
+        capture_output=True, text=True, cwd=REPO).stdout
+    addresses = {}
+    for line in out.splitlines():
+        m = re.match(r"\s*\d+:\s+([0-9a-f]{8})\s+\d+\s+FUNC\s+\S+\s+\S+\s+\S+\s+(\S+)$",
+                     line)
+        if m:
+            addresses.setdefault(m.group(2), int(m.group(1), 16))
+    return addresses
+
+
+def main():
+    if not GENERATED.exists():
+        sys.exit(f"missing {GENERATED}; run the recompiler first")
+
+    called = defined_recomp_functions()
+    addresses = symbol_addresses()
+
+    entries = []
+    unresolved = []
+    for name in sorted(called):
+        address = addresses.get(name)
+        if address is None:
+            unresolved.append(name)
+            continue
+        entries.append((address, name))
+
+    lines = [
+        "/* GENERATED by tools/gen_runtime_func_table.py -- do not edit. */\n",
+        "/*\n",
+        " * libultra functions the runtime provides, paired with the addresses they\n",
+        " * occupied on the cartridge. Registering them lets a call resolved by\n"
+        " * address find them, which every call is once\n",
+        " * use_lookup_for_all_function_calls is on.\n",
+        " */\n\n",
+        '#include "reimplemented_decls.h"\n\n',
+        "static const struct { uint32_t ram_addr; recomp_func_t* func; }\n",
+        "runtime_provided_funcs[] = {\n",
+    ]
+    for address, name in entries:
+        lines.append(f"    {{ 0x{address:08X}u, {name}_recomp }},\n")
+
+    patched = []
+    for name in sorted(patched_functions()):
+        address = addresses.get(name)
+        if address is None:
+            print(f"  no ELF address for patched function {name}")
+            continue
+        patched.append((address, name))
+        lines.append(f"    {{ 0x{address:08X}u, {name} }},   /* patched */\n")
+
+    lines.append("};\n")
+
+    OUT.write_text("".join(lines))
+
+    print(f"wrote {OUT.relative_to(REPO)}")
+    print(f"  _recomp functions with a definition        : {len(called)}")
+    print(f"  registered with a cartridge address        : {len(entries)}")
+    print(f"  patched functions registered               : {len(patched)}")
+    if unresolved:
+        print(f"  no address in the ELF (not registered)     : {len(unresolved)}")
+        for name in unresolved[:8]:
+            print(f"      {name}")
+
+
+if __name__ == "__main__":
+    main()
