@@ -107,6 +107,30 @@ bool shadow_interp_enabled() {
     return on;
 }
 
+// ---- the aiming reticle -----------------------------------------------------------
+//
+// The same shape as the shadow (Daniel: "It jitters when I aim around"). The
+// reticle is a camera-facing billboard of nine vertices around the aim point --
+// a centre, four corners and four edge midpoints -- computed in world coordinates
+// every frame (decomp AAA70.c func_800A2D98 / func_800A2260, the "ghost" copy in
+// func_800A2B58 draws the same vertices fainter) and drawn under the static world
+// matrix 0x80031160. It is found by its texture, SETTIMG 0x01009A70, followed by
+// a nine-vertex load, and each occurrence in a frame is given its own id in
+// order. A centre that moves more than kReticleTeleport world units in one game
+// frame -- a new target -- is drawn at its new place. BH_NO_RETICLE_INTERP=1: off.
+constexpr uint32_t kReticleTexture = 0x01009A70u;
+constexpr uint32_t kReticleId = 0x52544330u;          // "RTC0" + occurrence
+constexpr int kReticleTeleport = 2000;
+constexpr int kReticleMax = 4;
+
+bool reticle_interp_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_RETICLE_INTERP");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
 int class_of(const std::string& identity) {
     return bh::inspector::class_for(identity.c_str());
 }
@@ -142,9 +166,24 @@ struct Writer {
     int models = 0;
     bool have_player = false;
     int16_t player_x = 0, player_z = 0;
-    bool shadow_open = false;
+    bool shadow_open = false;   // a vertex-interpolated group (shadow or reticle) is open
     int shadows = 0;
     bool shadow_teleported = false;
+    uint32_t texture_image = 0; // w1 of the last SETTIMG
+    int reticles = 0;
+    int reticle_centres[kReticleMax][3] = {};   // this frame's, by occurrence
+
+    // Whether a vertex load is the reticle billboard; records its centre.
+    bool is_reticle(uint32_t w0, uint32_t w1) {
+        if (texture_image != kReticleTexture || ((w0 >> 10) & 0x3F) != 9 || ((w0 >> 17) & 0x7F) != 0) return false;
+        if (reticles >= kReticleMax) return false;
+        const uint32_t at = physical(w1) + 4 * 16;   // vertex 4: the aim point
+        const uint32_t a = read_word(rdram, at), b = read_word(rdram, at + 4);
+        reticle_centres[reticles][0] = static_cast<int16_t>(a >> 16);
+        reticle_centres[reticles][1] = static_cast<int16_t>(a);
+        reticle_centres[reticles][2] = static_cast<int16_t>(b >> 16);
+        return true;
+    }
 
     // Vertex interpolation for the shadow; G_EX_ID_AUTO puts RT64's defaults back.
     void shadow_group(uint32_t id, bool interpolate_vertices) {
@@ -360,6 +399,20 @@ struct Writer {
                         shadow_open = true;
                         ++shadows;
                     }
+                    else if (!shadow_open && model == 0 && reticle_interp_enabled() && is_reticle(w0, w1)) {
+                        static int previous[kReticleMax][3] = {};
+                        static bool had_previous[kReticleMax] = {};
+                        const int k = reticles;
+                        const int* c = reticle_centres[k];
+                        const bool jumped = !had_previous[k] ||
+                            std::abs(c[0] - previous[k][0]) + std::abs(c[1] - previous[k][1]) +
+                            std::abs(c[2] - previous[k][2]) > kReticleTeleport;
+                        previous[k][0] = c[0]; previous[k][1] = c[1]; previous[k][2] = c[2];
+                        had_previous[k] = true;
+                        shadow_group(kReticleId + static_cast<uint32_t>(k), !jumped);
+                        shadow_open = true;
+                        ++reticles;
+                    }
                     emit(w0, w1);
                     break;
                 case kEndDl:
@@ -460,6 +513,7 @@ struct Writer {
                     break;
                 case kSetTImg:
                     texture_ident = bh::hudid::texture(rdram, w1, physical(w1));
+                    texture_image = w1;
                     emit(w0, w1);
                     break;
                 case kSetFillColor:
@@ -556,6 +610,13 @@ uint32_t rewrite(uint8_t* rdram, uint32_t list_address) {
             std::fflush(stderr);
             lists = found = 0;
         }
+    }
+    static bool reported_reticle = false;
+    if (w.reticles > 0 && !reported_reticle) {
+        reported_reticle = true;
+        std::fprintf(stderr, "[bh] aiming reticle: vertices interpolated, %d in this frame (BH_NO_RETICLE_INTERP=1: off)\n",
+                     w.reticles);
+        std::fflush(stderr);
     }
     static bool reported_shadow = false;
     if (w.shadows > 0 && !reported_shadow) {

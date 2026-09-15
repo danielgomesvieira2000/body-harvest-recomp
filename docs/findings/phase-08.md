@@ -108,6 +108,29 @@ geometry steps at 20 frames while the player glides (playbook 09, Wave Race's sk
 units of the player. `BH_SHADOW_TRACE=1`: found in 100 of 100 lists, walking and turning. Daniel:
 the jitter is gone with it and back with `BH_NO_SHADOW_INTERP=1`.
 
+## The aiming reticle
+
+**Reported:** "I would like to implement matrix interpolation on the aiming crosshair. It jitters when I
+aim around."
+
+**How the game draws it:**
+- The reticle is a camera-facing billboard at the aim point, scaled with distance, built in
+  `func_800A2D98_B1D48` and emitted by `func_800A2260_B1210`.
+- It is nine vertices (centre, corners, edge midpoints) in world coordinates under the static world
+  matrix `0x80031160`, preceded by `SETTIMG 0x01009A70`, then one quad and three triangle pairs.
+- `func_800A2B58_B1B08` ("ghost target") draws the same vertices again, fainter.
+
+It is the shadow's case: geometry rebuilt under an unchanging matrix, stepping at 20 frames.
+
+**Fix:** the shadow's group, reused.
+- Found by that texture followed by a nine-vertex load.
+- One id per occurrence in the frame (the scripted aim run found 2).
+- Vertex interpolation, linear order.
+- A centre jump over 2,000 units (a new target) is not interpolated.
+- `BH_NO_RETICLE_INTERP=1`: off.
+
+**Verified:** Daniel, aiming around: "The crosshair fix worked."
+
 **Not covered yet:** other characters' and vehicles' models and shadows (same two mechanisms; aliens and
 civilians go through `func_8007C044` and the same shadow function).
 

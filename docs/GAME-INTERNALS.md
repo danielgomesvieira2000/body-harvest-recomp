@@ -105,6 +105,11 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   ± rotated half-extents, centre last, heights from the terrain), built in world coordinates in the
   frame's vertex buffer, drawn with `gSPVertex(5)` and two `gSP2Triangles` under the shared world
   matrix. Texture `0x05000000` when on foot.
+- **Aiming reticle:** `func_800A2D98_B1D48` stores the aim point in `D_8014F618` (+0..+8), the billboard
+  axes scaled by camera distance, and emits it through `func_800A2260_B1210`. It is texture
+  `0x01009A70` (I4) and a nine-vertex world-space billboard (centre is vertex 4) under the world matrix
+  `0x80031160`, followed by a model `0x0100ACB0` at the target. `func_800A2B58_B1B08` redraws the
+  billboard fainter.
 - **Display-list buffers:** two, alternated per frame (`D_801CE710 - D_80031B84 * 0x22B00`); top-level
   list at `+0x280` (`0x801CE990`).
 

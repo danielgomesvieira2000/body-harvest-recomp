@@ -278,6 +278,7 @@ Rerun it after any submodule update.
 | `BH_NO_SKY_STRETCH=1` | the outdoor sky's tile rows stay 4:3 |
 | `BH_NO_MODEL_IDS=1` | the player model's parts are left to RT64's own pairing |
 | `BH_NO_SHADOW_INTERP=1` / `BH_SHADOW_TRACE=1` | the player's shadow steps at the game's rate / how often it is found |
+| `BH_NO_RETICLE_INTERP=1` | the aiming reticle steps at the game's rate |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs
@@ -322,6 +323,11 @@ its own, with vertex interpolation, linear order and a fixed id. It is found as 
 fifth vertex is the corners' mean, within 96 units of the player. It is *near*, not *at*, his position:
 by submission the game has moved him 10–14 units on. `BH_NO_SHADOW_INTERP=1`: off; `BH_SHADOW_TRACE=1`
 reports how often it is found.
+
+**Symptom: the aiming reticle jitters while aiming.** It is a nine-vertex world-space billboard under the
+static world matrix, the shadow's case. The same group applies, found by `SETTIMG 0x01009A70` followed
+by a nine-vertex load, one id per occurrence (reticle and its ghost copy), with no interpolation across a
+jump of more than 2,000 units. `BH_NO_RETICLE_INTERP=1`: off.
 
 ---
 
