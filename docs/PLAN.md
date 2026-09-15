@@ -207,4 +207,4 @@ game data.
 
 | Date | Commit | Submodule pins | What Daniel confirmed |
 |---|---|---|---|
-| | | | |
+| 2026-09-15 | `443a435` | N64ModernRuntime `cdf5abb`, RT64 `5473732`, RecompFrontend `b1a1477`, bh-decomp `4600677` | Outdoor sky fills a 16:9 window, aiming at the sky included. Open: player model jitters under interpolation |
