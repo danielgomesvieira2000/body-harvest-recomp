@@ -14,7 +14,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 LISTS = REPO / "lib/N64ModernRuntime/N64Recomp/src/symbol_lists.cpp"
-ELF = REPO / "elf/body-harvest.us.elf"
+ELF = REPO / "elf/bh.us.fixed.elf"
+CONFIG = REPO / "recomp/body-harvest.us.toml"
 
 
 def names(src, marker):
@@ -29,11 +30,17 @@ def main() -> int:
     funcs = [p[7] for p in (l.split() for l in out.splitlines())
              if len(p) >= 8 and p[3] == "FUNC" and p[6] not in ("UND", "ABS")]
     owned = sum(1 for n in funcs if n in runtime)
+    # The config's own `ignored` list emits nothing either (its `stubs` do emit).
+    cfg = CONFIG.read_text()
+    block = cfg[cfg.index("ignored = ["):]
+    ours = set(re.findall(r'^\s*"([^"]+)"', block[:block.index("]")], re.M))
+    ignored_here = sum(1 for n in funcs if n in ours and n not in runtime)
+    owned += ignored_here
     emitted = sum(len(re.findall(r"^RECOMP_FUNC void ", f.read_text(), re.M))
                   for f in (REPO / "RecompiledFuncs").glob("funcs_*.c"))
     expected = len(funcs) - owned
     print("FUNC symbols in ELF  : %d" % len(funcs))
-    print("owned by the runtime : %d (reimplemented or ignored by name)" % owned)
+    print("owned by the runtime : %d (reimplemented or ignored by name, %d from our config)" % (owned, ignored_here))
     print("functions emitted    : %d (expected %d)" % (emitted, expected))
     print("source files         : %d" % len(list((REPO / "RecompiledFuncs").glob("funcs_*.c"))))
     if emitted != expected:

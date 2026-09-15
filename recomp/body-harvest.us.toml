@@ -1,0 +1,46 @@
+# N64Recomp configuration for Body Harvest (USA), NBHE.
+#
+# Input: the decompilation's matching build, post-processed by tools/fix_elf.py
+# and verified byte-identical by tools/verify_elf.py (docs/findings/phase-01.md).
+# Paths are relative to this file.
+
+[input]
+
+# ELF input mode (playbook 01).
+elf_path = "../elf/bh.us.fixed.elf"
+
+# Cartridge header +0x8 and the decomp's core segment vram agree.
+entrypoint = 0x80000400
+
+# Route every call through the runtime's function lookup. Three gameplay
+# overlays share 0x80070270 and five level overlays share 0x802D4CD0, and
+# resident code calls into both windows: only what is loaded at the time can say
+# which function is meant (Wave Race 64's mechanism, docs/PLAN.md D6). The key is
+# added by tools/patch_n64recomp.py.
+use_lookup_for_all_function_calls = true
+
+output_func_path = "../RecompiledFuncs"
+functions_per_output_file = 100
+
+# Declarations for the libultra functions N64Recomp delegates to the runtime
+# (tools/gen_reimplemented_decls.py writes the header into RecompiledFuncs/).
+recomp_include = """#include "recomp.h"
+#include "reimplemented_decls.h""""
+
+# The eight shared-vram overlays; each is announced to the runtime when the
+# game's loader brings it in (src/overlays.cpp).
+relocatable_sections_path = "overlays.txt"
+
+[patches]
+
+stubs = [
+]
+
+ignored = [
+    # The tail of libultra's hand-written __osException (exceptasm.s) that splat
+    # split into its own symbol: it branches back into __osException (0x8002359C,
+    # 0x800235B4), which N64Recomp refuses. __osException itself is a built-in
+    # ignored function -- the runtime delivers interrupts -- so nothing reaches
+    # this. Wave Race 64 listed its equivalent (func_800CB0A8) the same way.
+    "func_800235E4_241E4",
+]

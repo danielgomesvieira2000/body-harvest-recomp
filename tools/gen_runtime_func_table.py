@@ -32,7 +32,7 @@ REPO = Path(__file__).resolve().parent.parent
 GENERATED = REPO / "RecompiledFuncs"
 OUT = GENERATED / "runtime_funcs.inl"
 # ---- port config -----------------------------------------------------------
-ELF = "elf/body-harvest.us.elf"               # the assembled ELF, relative to the repo root
+ELF = "elf/bh.us.fixed.elf"               # the assembled ELF, relative to the repo root
 CONFIG = REPO / "recomp" / "body-harvest.us.toml"  # the N64Recomp config holding `ignored`
 # ----------------------------------------------------------------------------
 

@@ -1,0 +1,8 @@
+.overlay_gameplay_frontend
+.overlay_gameplay_outside
+.overlay_gameplay_inside
+.overlay_level_greece
+.overlay_level_java
+.overlay_level_america
+.overlay_level_siberia
+.overlay_level_comet
