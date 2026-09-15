@@ -504,13 +504,31 @@ int builtin_class(const char* identity) {
     return it == builtin().end() ? kAuto : it->second;
 }
 
+namespace {
+// This frame's classes from the port's own analysis (set_frame_classes). Read and
+// written only on the display-list thread, so no lock.
+std::unordered_map<std::string, int> g_frame_classes;
+}  // namespace
+
+void set_frame_classes(std::unordered_map<std::string, int>&& classes) {
+    g_frame_classes = std::move(classes);
+}
+
+int frame_class(const char* identity) {
+    if (identity == nullptr || g_frame_classes.empty()) return kAuto;
+    const auto it = g_frame_classes.find(identity);
+    return it == g_frame_classes.end() ? kAuto : it->second;
+}
+
 int class_for(const char* identity) {
     int cls = builtin_class(identity);
+    if (cls == kAuto) cls = frame_class(identity);
     override_class(identity, &cls);
     return cls;
 }
 
 bool any_classes() {
+    if (!g_frame_classes.empty()) return true;
     return g_enabled && (g_any_overrides.load(std::memory_order_relaxed) || !builtin().empty());
 }
 

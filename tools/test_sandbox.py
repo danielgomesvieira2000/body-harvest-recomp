@@ -20,7 +20,7 @@ What it does:
 2. Copies each `--seed` file into the sandbox (a pak, a hud.json, a graphics.json).
 3. Runs it: with `--capture FROM TO` through `capture_frames.py` (frames + `game.log` in `--out`),
    otherwise for `--seconds` with output to `--out/game.log`; `--grab 10,20` also photographs the
-   window at those seconds with `grab_window.ps1` (by process id; the window must be uncovered).
+   window at those seconds with `print_window.py` (PrintWindow: the window's own contents, covered or not).
    Body Harvest added --grab: `capture_frames.py` saved 0 frames of this port's window on this machine.
 4. Copies the sandbox's settings files that changed into `--out/settings/` (so a test's saves can
    be inspected), then deletes the sandbox, unless `--keep`.
@@ -121,8 +121,9 @@ def main():
                     if proc.poll() is not None:
                         break
                     png = out / f"grab_t{at:05.1f}s.png"
-                    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File",
-                                    str(HERE / "grab_window.ps1"), "-Out", str(png), "-ProcId", str(proc.pid)],
+                    # The window's own contents (PrintWindow), so a covering window
+                    # does not end up in the picture (tools/print_window.py).
+                    subprocess.run([sys.executable, str(HERE / "print_window.py"), str(png), str(proc.pid)],
                                    check=False, stdout=subprocess.DEVNULL)
                 try:
                     proc.wait(timeout=max(0.0, args.seconds - (time.time() - launched)))

@@ -27,6 +27,8 @@
 // under a lock, once per frame.
 
 #include <cstdint>
+#include <string>
+#include <unordered_map>
 
 namespace bh::inspector {
 
@@ -72,9 +74,17 @@ int builtin_class(const char* identity);
 // there is one, else the built-in class.
 int class_for(const char* identity);
 
-// Whether anything is classified at all, built in or overridden. The rewriter
-// checks it before copying anything.
+// Whether anything is classified at all: built in, overridden, or given by this
+// frame's analysis. The rewriter checks it before copying anything.
 bool any_classes();
+
+// Classes the port's own analysis of the current frame gives (src/dlcensus.cpp:
+// full-screen tile backgrounds). They rank below the panel, hud.json and the
+// built-in table. Display-list thread only; replaces the previous frame's set.
+void set_frame_classes(std::unordered_map<std::string, int>&& classes);
+
+// The class this frame's analysis gave an identity, or kAuto.
+int frame_class(const char* identity);
 
 // ---- the panel's side, on the renderer's UI thread --------------------------
 

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -350,19 +351,77 @@ uint64_t g_lists = 0;
 
 }  // namespace
 
+// Full-screen tile backgrounds (the title, slot select, name entry and intro
+// screens): the frontend draws its 320x240 backdrops as a grid of 32x32 texture
+// rectangles (BH_HUD_ELEMENTS_LOG on the title: rows at y 176..208 and 208..240,
+// ten columns each, tex:0x0408xxxx). As 2D they stay in the middle 4:3 of a wide
+// window, pillarboxed. A frame whose tiles fill at least one whole row of the
+// grid is a backdrop: every grid tile in it gets the stretch class, which RT64
+// maps across the full width (playbook 08). Rectangles off the grid (buttons,
+// text, portraits) are untouched. BH_NO_BG_STRETCH=1 turns it off.
+bool background_stretch_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_BG_STRETCH");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
+bool is_grid_tile(float x0, float x1, float y0, float y1) {
+    const float w = x1 - x0, h = y1 - y0;
+    if (w < 31.0f || w > 32.5f || h < 31.0f || h > 32.5f) return false;
+    // Columns start on multiples of 32; rows on multiples of 16 (the title's grid
+    // rows start at y 176, 208; the intro's at 192, 224 and run off the bottom).
+    if (x0 < -0.5f || x0 > 288.5f || y0 < -16.5f || y0 > 239.5f) return false;
+    const float cx = x0 / 32.0f, cy = y0 / 16.0f;
+    return std::fabs(cx - std::round(cx)) < 0.02f && std::fabs(cy - std::round(cy)) < 0.04f;
+}
+
 void per_frame(uint8_t* rdram, uint32_t list_address) {
-    if (!bh::inspector::enabled()) return;
+    const bool panel = bh::inspector::enabled();
+    const bool backgrounds = background_stretch_enabled();
+    if (!panel && !backgrounds) return;
 
     Census c{ rdram };
     c.hud = true;
     for (int i = 0; i < 4; ++i) c.modelview[0][i][i] = 1.0;
     c.walk(list_address, 0);
 
+    std::unordered_map<std::string, int> frame_classes;
+    if (backgrounds) {
+        // Columns seen per row start (y in 16-px steps, offset so -16 is row 0).
+        uint16_t columns[18] = {};
+        for (const auto& e : c.elements) {
+            if (e.rect && is_grid_tile(e.x0, e.x1, e.y0, e.y1)) {
+                const int row = int(std::round(e.y0 / 16.0f)) + 1;
+                const int col = int(std::round(e.x0 / 32.0f));
+                if (row >= 0 && row < 18 && col >= 0 && col < 10) columns[row] |= uint16_t(1u << col);
+            }
+        }
+        const bool full_row = std::any_of(std::begin(columns), std::end(columns),
+                                          [](uint16_t cols) { return cols == 0x3FF; });
+        if (full_row) {
+            for (const auto& e : c.elements) {
+                if (e.rect && is_grid_tile(e.x0, e.x1, e.y0, e.y1)) frame_classes[e.identity] = bh::inspector::kStretch;
+            }
+            static bool announced = false;
+            if (!announced) {
+                announced = true;
+                std::fprintf(stderr, "[bh] first full-screen tile background: %zu tiles stretched (BH_NO_BG_STRETCH=1: off)\n",
+                             frame_classes.size());
+                std::fflush(stderr);
+            }
+        }
+    }
+    bh::inspector::set_frame_classes(std::move(frame_classes));
+
+    if (!panel) return;
     bh::inspector::begin_frame(0);   // no game-state variable identified yet
     for (const auto& e : c.elements) {
-        // "As classified" in the panel is the built-in class; the panel shows an
-        // override on top of it itself.
-        const int given = bh::inspector::builtin_class(e.identity.c_str());
+        // "As classified" in the panel: the built-in class, else this frame's
+        // analysis. The panel shows an override on top of it itself.
+        int given = bh::inspector::builtin_class(e.identity.c_str());
+        if (given == bh::inspector::kAuto) given = bh::inspector::frame_class(e.identity.c_str());
         // BH_HUD_ELEMENTS_LOG=1: every new identity once, with its extent, so tags
         // can be matched to elements from a log.
         static const bool log_elements = std::getenv("BH_HUD_ELEMENTS_LOG") != nullptr;
