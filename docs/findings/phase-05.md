@@ -43,6 +43,53 @@ powershell -File tools/shoot_run.ps1 -Count 18 -Interval 5 -Delay 4 -OutDir <dir
   sets the frame's VI count `var_v1 = 3` outside menus and `1` in the frontend modes, and the port
   measures exactly 20 and 60.
 
+## Rumble (after Daniel's playtest)
+
+**Reported:** "It seems like the rumble is not working."
+
+**Measured, in order:**
+
+| Question | How | Result |
+|---|---|---|
+| Does the harness pass rumble on? | read `src/callbacks.cpp`, `src/frontend.cpp` | `has_rumble_strength`, `set_rumble` → `recompinput::set_rumble`, `update_rumble()` each frame, port 1 reports a Rumble Pak: complete |
+| Does the runtime? | read ultramodern `input.cpp` | `osMotorInit` marks the pak initialised; `osMotorStart/Stop` call `set_rumble(channel, flag)` |
+| Does the game call it? | `BH_TRACE_FUNCS=0x8001CA80,0x8001C798,0x8001C630` while firing | init → 0; `osMotorStop` called constantly, `osMotorStart` in gameplay, both → 0 |
+| Why is it not felt? | decomp `1050.c` | see below |
+
+**Cause:** the game sets strength by pulse density. Its rumble logic `func_80001190_1D90` runs once per
+controller-loop pass:
+- it adds `(intensity >> 4)³ / 512` to an accumulator;
+- it queues `osMotorStart` when the accumulator reaches 256 (and subtracts 256), `osMotorStop` otherwise;
+- the rumble thread `func_80000ED4_1AD4` turns the queue into motor calls.
+
+So strength is the fraction of passes with the motor on. recompinput models an on/off motor sampled once
+per rendered frame, ramping +0.17 while on and decaying ×0.92 while off. A sample of a pulse train is a
+random instant of it, so rumble barely got through.
+
+**Fix** (`src/callbacks.cpp`):
+- `set_rumble` records when the motor goes on and off.
+- Once per frame the main thread turns that into duty (on-time ÷ elapsed time).
+- The duty is low-passed like a motor (40 ms up, 80 ms down, judged by feel), times the Rumble Strength
+  slider, and zero when muted out of focus.
+- It goes to both of the pad's motors with `SDL_GameControllerRumble`, sent on a change of ≥ 0x800 or
+  refreshed every 100 ms.
+- recompinput's `update_rumble` is no longer called; it would overwrite the strength.
+- `BH_RUMBLE_RAW=1` restores the old path; `BH_RUMBLE_TRACE=1` logs motor calls per second, mean duty,
+  peak level and the last strength sent.
+
+**Result:** Daniel: "rumble is working correctly now".
+
+**Open, measured with `BH_RUMBLE_TRACE`:** the controller loop makes 23,000–28,900 motor calls a
+second, one per pass, so it runs ~25 kHz. The 1 ms SI latency glue (phase 04) should hold it near 1 kHz,
+so it does not throttle this loop as intended.
+
+Consequences:
+- The game's rumble hold and fade counters (`D_80047688`, `D_8004768C` against 10,001 and 801 passes)
+  run out many times faster than on hardware. *Inferred:* rumble events are shorter than intended.
+- One message and thread switch per pass costs CPU.
+
+The hardware loop rate is not known here. Not changed yet.
+
 ## Consequence for the plan
 
 Departure: phase 06 before phase 05's gate. The checks above are asked for in the same playtest as

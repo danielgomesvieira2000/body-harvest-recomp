@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -393,12 +394,85 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
 #endif
 }
 
+// ---- rumble: the motor the game pulses ----
+//
+// Body Harvest sets the Rumble Pak's strength by pulse density, not by holding the
+// motor on. Every pass of its controller loop (func_80001190_1D90) adds
+// (intensity >> 4)^3 / 512 to an accumulator and sends osMotorStart when that
+// passes 256, osMotorStop otherwise, so a half-strength rumble is the motor on
+// for half the passes, and the real motor's inertia turns the pulses into a
+// steady buzz (docs/findings/phase-05.md, "Rumble"). The runtime routes each call
+// here.
+//
+// recompinput models a motor that is simply on or off: it looks at the flag once
+// per rendered frame, ramps up while it reads on and decays while it reads off.
+// Sampling a pulse train that way sees a random instant of it; most rumble never
+// got through, which is what Daniel reported. So the port keeps the motor model:
+// the time the motor was on between two frames, divided by the time between
+// them, is the duty, low-passed like a motor spinning up and down, times the
+// Rumble Strength slider, sent to both of the pad's motors. recompinput's
+// update_rumble is not called any more -- it would write its own strength over
+// this one every frame. BH_RUMBLE_RAW=1 goes back to it (A/B); BH_RUMBLE_TRACE=1
+// logs pulses a second and the duty.
+namespace rumble {
+
+using clock = std::chrono::steady_clock;
+
+std::atomic<bool> g_on{ false };
+std::atomic<int64_t> g_on_since_ns{ 0 };   // when the motor last went on
+std::atomic<int64_t> g_on_total_ns{ 0 };   // on-time accumulated up to that point
+std::atomic<uint32_t> g_calls{ 0 };
+
+int64_t now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch()).count();
+}
+
+bool raw_mode() {
+    static const bool raw = [] {
+        const char* v = std::getenv("BH_RUMBLE_RAW");
+        return v != nullptr && *v != '\0' && *v != '0';
+    }();
+    return raw;
+}
+
+// On the thread that runs the game's rumble requests.
+void motor(bool on) {
+    g_calls.fetch_add(1, std::memory_order_relaxed);
+    const bool was = g_on.load(std::memory_order_relaxed);
+    if (on == was) return;
+    const int64_t t = now_ns();
+    if (on) {
+        g_on_since_ns.store(t, std::memory_order_relaxed);
+    }
+    else {
+        g_on_total_ns.fetch_add(t - g_on_since_ns.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    g_on.store(on, std::memory_order_relaxed);
+}
+
+// Total on-time up to now, as seen from the main thread.
+int64_t on_time(int64_t t) {
+    int64_t total = g_on_total_ns.load(std::memory_order_relaxed);
+    if (g_on.load(std::memory_order_relaxed)) {
+        total += std::max<int64_t>(0, t - g_on_since_ns.load(std::memory_order_relaxed));
+    }
+    return total;
+}
+
+}  // namespace rumble
+
 // The runtime's rumble callback. Body Harvest drives a Rumble Pak through
 // osMotorStart/osMotorStop, which the runtime reimplements and routes here once
 // get_connected_device_info reports a Rumble Pak in the slot.
 void set_rumble(int controller_num, bool rumble) {
 #if BH_WITH_FRONTEND
-    recompinput::set_rumble(controller_num, rumble);
+    if (rumble::raw_mode()) {
+        recompinput::set_rumble(controller_num, rumble);
+        return;
+    }
+    if (controller_num == 0) {
+        rumble::motor(rumble);
+    }
 #else
     if (controller_num != 0 || g_controller == nullptr) {
         return;
@@ -1241,6 +1315,67 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 #endif
 }
 
+#if BH_WITH_FRONTEND
+// Once per frame on the main thread: the motor model (see namespace rumble).
+void drive_rumble(bool silenced) {
+    static int64_t last_t = rumble::now_ns();
+    static int64_t last_on = rumble::on_time(last_t);
+    static double level = 0.0;
+    static int last_sent = -1;
+    static int64_t last_send_t = 0;
+
+    const int64_t t = rumble::now_ns();
+    const int64_t dt = t - last_t;
+    if (dt <= 0) return;
+    const int64_t on = rumble::on_time(t);
+    const double duty = std::clamp(double(on - last_on) / double(dt), 0.0, 1.0);
+    last_t = t;
+    last_on = on;
+
+    // A small DC motor: quick to spin up, slower to run down (time constants in
+    // seconds, judged by feel; the Rumble Pak's own are not measured).
+    const double tau = duty > level ? 0.04 : 0.08;
+    level += (duty - level) * (1.0 - std::exp(-(dt / 1e9) / tau));
+
+    const double slider = std::clamp(recompui::config::general::get_rumble_strength(), 0.0, 100.0) / 100.0;
+    int strength = silenced ? 0 : int(std::lround(level * slider * 0xFFFF));
+    if (strength < 0x0400) strength = 0;   // below what a pad motor turns at
+
+    // Send on a change, and refresh a held level before SDL's duration runs out.
+    const bool changed = last_sent < 0 || std::abs(strength - last_sent) >= 0x0800 || (strength == 0) != (last_sent == 0);
+    if (changed || (strength != 0 && t - last_send_t > 100'000'000)) {
+        for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+            if (!SDL_IsGameController(i)) continue;
+            SDL_GameController* pad = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
+            if (pad != nullptr) {
+                SDL_GameControllerRumble(pad, uint16_t(strength), uint16_t(strength), strength != 0 ? 250 : 0);
+            }
+        }
+        last_sent = strength;
+        last_send_t = t;
+    }
+
+    static const bool trace = std::getenv("BH_RUMBLE_TRACE") != nullptr;
+    if (trace) {
+        static int64_t window_t = t;
+        static double duty_sum = 0, level_max = 0;
+        static int frames = 0;
+        duty_sum += duty;
+        level_max = std::max(level_max, level);
+        ++frames;
+        if (t - window_t >= 1'000'000'000) {
+            const uint32_t calls = rumble::g_calls.exchange(0, std::memory_order_relaxed);
+            std::fprintf(stderr, "[bh-rumble] %u motor calls/s, duty %.2f mean, level %.2f max, sent 0x%04X\n",
+                         calls, duty_sum / frames, level_max, last_sent);
+            std::fflush(stderr);
+            window_t = t;
+            duty_sum = level_max = 0;
+            frames = 0;
+        }
+    }
+}
+#endif
+
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     // This is librecomp's main loop body, so counting it distinguishes "the
     // loop never ran" from "the loop ran and then something ended it".
@@ -1262,14 +1397,19 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     g_window_focused.store(focused, std::memory_order_relaxed);
 
 #if BH_WITH_FRONTEND
-    // Alt-tabbed away with Mute When Not In Focus on, the motor stops too.
-    if (!focused && g_mute_unfocused.load(std::memory_order_relaxed)) {
-        recompinput::set_rumble(0, false);
+    const bool silenced = !focused && g_mute_unfocused.load(std::memory_order_relaxed);
+    if (rumble::raw_mode()) {
+        // Alt-tabbed away with Mute When Not In Focus on, the motor stops too.
+        if (silenced) {
+            recompinput::set_rumble(0, false);
+        }
+        // recompinput ramps and decays the motor towards what the game last asked
+        // for; the library never calls this itself (Wave Race 64).
+        recompinput::update_rumble();
     }
-    // recompinput ramps and decays the motor towards what the game last asked
-    // for through the Rumble Pak (osMotorStart/Stop); the library never calls this
-    // itself, and without it set_rumble only sets a flag (Wave Race 64).
-    recompinput::update_rumble();
+    else {
+        drive_rumble(silenced);
+    }
     bh::frontend::maybe_autostart();
 #endif
 }

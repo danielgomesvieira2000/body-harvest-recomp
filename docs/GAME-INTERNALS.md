@@ -126,6 +126,17 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
 ## Input
 
 - One controller; the game reads it continuously from its own thread (Threads above).
+- **Rumble:** strength by pulse density. `func_80001190_1D90`, once per controller-loop pass in gameplay
+  modes 1, 3 and 0xB:
+  - adds `(D_80047680 >> 4)³ / 512` to `D_8004767C`;
+  - at ≥ 0x100 queues start (`func_80001050`) and subtracts 0x100; otherwise it queues stop (`func_8000108C`);
+  - intensity `D_80047680` falls by `D_80047684` per pass after a hold of `D_80047688` passes;
+  - past 10,001 passes the output fades with `(pass count)^-3`;
+  - with the pak lost, it re-checks every 2,500 passes.
+
+  The rumble thread `func_80000ED4_1AD4` (pri 15) turns the queue into `osMotorStart/Stop/Init`. In the
+  port the loop makes ~25,000 passes a second (`BH_RUMBLE_TRACE=1`), so pass-counted timings run fast
+  (phase-05.md).
 
 ## Saves
 

@@ -148,6 +148,16 @@ Fixed in the port, not the game:
 Same run after the fix: Greece gameplay at 20 frames/s, no failed task. A normal run
 (`BH_AUDIO_STATS=1`, 75 s) is unchanged: 35 of 36 windows with nothing zero-filled.
 
+## Rumble
+
+**Symptom: no rumble felt, although the game calls `osMotorStart`.** The game sets strength by pulse
+density: every controller-loop pass it starts or stops the motor from a sigma-delta accumulator
+(GAME-INTERNALS.md, Input). recompinput samples an on/off flag once per frame, which misses the pulses.
+`src/callbacks.cpp` instead measures the time-weighted on-fraction between frames. It low-passes that
+like a motor, multiplies by the Rumble Strength slider and drives both pad motors with
+`SDL_GameControllerRumble`; recompinput's `update_rumble` is not called. `BH_RUMBLE_RAW=1` restores the
+old path.
+
 ## Overlays
 
 **Symptom: lookup misses inside `0x80070270`–`0x80149380` or `0x802D4CD0`–.** The overlay at that window
@@ -256,6 +266,7 @@ Rerun it after any submodule update.
 | `BH_AUDIO_STATS=1` / `BH_AUDIO_DUMP` / `BH_AUDIO_HEADROOM_MS` / `BH_AUDIO_PERIOD` / `BH_AUDIO_NO_RESAMPLE` | audio diagnostics and knobs |
 | `BH_SI_LATENCY_MS=<n>` | controller transfer latency (default 1; 0 = immediate, which stalls boot) |
 | `BH_NO_RUMBLE_PAK=1` | report an empty accessory slot |
+| `BH_RUMBLE_RAW=1` / `BH_RUMBLE_TRACE=1` | rumble through recompinput's on/off model (felt as nothing) / log motor calls, duty and strength each second |
 | `BH_PRESENT_MODE=console\|skip\|early` | RT64 presentation mode |
 | `BH_DL_CENSUS=<n>` | census of every n-th display list (first 12 rectangles, with s,t, dsdx,dtdy and colour image) |
 | `BH_INSPECTOR=0` | hide the HUD panel |
