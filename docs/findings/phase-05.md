@@ -90,6 +90,47 @@ Consequences:
 
 The hardware loop rate is not known here. Not changed yet.
 
+## The map crash
+
+**Reported:** "The game crashed due to opening the map" (START in gameplay).
+
+**Crash report:**
+- `ACCESS_VIOLATION` in `RT64::RDP::loadTileOperation` (`rt64_rdp.cpp:508`), on the Gfx thread;
+- reached from `State::fullSyncFramebufferPairTiles` and the port's `send_dl`.
+
+Reproduced by script (`walk-greece.txt` with START at 117 s).
+
+**Hypotheses, in order:**
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| The rewriter, now running every frame, inlines a list whose segment it never saw | `BH_NO_HUD_REWRITE=1` | still crashes: refuted |
+| Replacing `setGameplayResolution` left the screen size unset | `BH_FULL_FRAME=0` | still crashes: refuted |
+| Look at the commands RT64 gets | probe: every `G_LOADTILE` with backwards extents | every piece `LOADTILE … uls 0 ult 80 lrs 0 lrt 0` from `TIMG 803DA800` (the second framebuffer) |
+
+**Cause:**
+- The pause transition (`func_8000E53C_F13C`, decomp `E830.c`) cuts the last frame into a 16×12 grid
+  of tiles sized from `D_8005BAEC/D_8005BAF0` (screen width and height).
+- Both were 0. Their only writer, `0x8000E4B0` (callers pass `D_80068084, D_80068088`), is named
+  `osSetTime` in the decomp, which is on N64Recomp's runtime list.
+- So every call went to ultramodern's `osSetTime`. It set the OS clock to `320<<32 | 240` and never
+  stored the size.
+- A real RDP loads nothing for a tile whose bottom is above its top; RT64's `rowCount = 1 + (lrt − ult)`
+  underflowed and it read gigabytes past RDRAM.
+
+**Fix:** `tools/fix_elf.py` renames that symbol `bhSetSize`, guarded by name, address and size. The
+game's own function is recompiled: 2,920 functions emitted (was 2,919).
+
+**Audit:** all 125 runtime-owned names present in the ELF were listed with address and size. `osSetTime`
+was the only one in game code (`0x8000E4B0`); every other one sits in the libultra range from
+`0x8001ABE0`.
+
+**Result:** the same script, no crash, well-formed tiles (e.g. `uls 1200 ult 720 lrs 1280 lrt 800`).
+Daniel: "That fixed the crash."
+
+*Inferred, not measured:* the clock was also set to 320·2³² + 240 each time the size was "set", which
+may have disturbed anything timed with `osGetTime` around menus.
+
 ## Consequence for the plan
 
 Departure: phase 06 before phase 05's gate. The checks above are asked for in the same playtest as

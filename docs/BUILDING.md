@@ -64,7 +64,7 @@ In order, each stage checking its own result:
 | the decompilation's matching build | `tools/wsl_build_elf.sh` (mirrors `lib/bh-decomp` to `~/.cache/body-harvest-recomp/decomp`, creates its Python venv the first time) | `build/bh.us.z64: OK` |
 | ELF repair | `tools/fix_elf.py` | `end state: 3045 FUNC, 0 ABS, 0 size 0, 0 duplicate addresses` |
 | ELF verification | `tools/verify_elf.py` | `ELF verified` |
-| recompile | `tools/recompile.sh` | `functions emitted : 2919 (expected 2919)` |
+| recompile | `tools/recompile.sh` | `functions emitted : 2920 (expected 2920)` |
 
 After a change to `recomp/*.toml` only the last stage is needed: `wsl -d Ubuntu -e bash tools/recompile.sh`.
 

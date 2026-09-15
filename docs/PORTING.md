@@ -62,6 +62,14 @@ three symbol-table traps before N64Recomp sees the ELF:
 
 The last one was found as a run-time miss at `0x8001F8B0` from `alBnkfNew` (phase 04).
 
+**Symptom: the game crashes in RT64 `loadTileOperation` when the pause map opens.** The decomp names
+the game's set-screen-size routine (`0x8000E4B0`, two stores) `osSetTime`, a name on N64Recomp's
+runtime list. So its calls went to ultramodern's `osSetTime`, which set the OS clock instead. The size
+(`D_8005BAEC/F0`) stayed 0, and the pause transition's framebuffer tiles arrived as
+`LOADTILE … lrs 0 lrt 0`; RT64's unsigned row count underflowed. `fix_elf.py` renames it `bhSetSize`
+(table `MISNAMED`, checked by address and size). Audit: of the 125 runtime-owned names in the ELF, it
+was the only one outside the libultra address range.
+
 `tools/verify_elf.py` then checks: every PROGBITS section byte-identical to the dump at the ROM address
 N64Recomp computes (PT_LOAD paddr + offset), yaml code segments agree, address-named functions placed
 exactly, no ABS / size-0 / overlapping FUNC. Data labels whose names disagree with their address (31, a
@@ -81,7 +89,7 @@ decomp naming slip) are listed, not failed.
 `0xE20` (the task's declared `0xF80` overruns into the next microcode), IMEM `0x04001080`, 16-entry
 table from ROM `0x3FC70`.
 
-Counts (`tools/count_recompiled.py`): 3,045 FUNC − 125 runtime-owned − 1 ignored = 2,919 emitted.
+Counts (`tools/count_recompiled.py`): 3,045 FUNC − 124 runtime-owned − 1 ignored = 2,920 emitted.
 
 ## The harness
 

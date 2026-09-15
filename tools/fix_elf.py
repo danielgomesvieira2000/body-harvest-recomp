@@ -37,6 +37,15 @@ that byte identity cannot see (playbook 02):
    before its first name, or with no name at all, is reported (exit 1 unless its
    words are all `jr $ra; nop` pairs -- empty static functions nothing calls).
 
+4. **Game functions under a libultra name.** N64Recomp hands every function whose
+   name is on its runtime lists to the runtime, whatever its body. The decomp
+   names the game's "set screen size" routine at 0x8000E4B0 `osSetTime` (two
+   stores; every caller passes the width and height). Recompiled under that name,
+   each call set the OS clock instead and the size stayed 0: the pause/map
+   transition then sent zero-sized tiles and RT64 crashed reading past RDRAM
+   (docs/findings/phase-05.md, "The map crash"). MISNAMED renames such symbols
+   in place, each checked by address and size first.
+
 Also reported and resolved: two FUNC symbols at one address in one section.
 The one with a non-zero size (else the global one, else the first) stays FUNC;
 the others become NOTYPE, so N64Recomp emits the function once.
@@ -55,6 +64,12 @@ SHT_NOBITS = 8
 SHF_EXECINSTR = 0x4
 SHN_ABS = 0xFFF1
 STT_NOTYPE, STT_OBJECT, STT_FUNC = 0, 1, 2
+
+# (name in the decomp, address, size) -> new name, no longer than the old one (the
+# string is rewritten in place) and on no N64Recomp runtime list.
+MISNAMED = {
+    ("osSetTime", 0x8000E4B0, 20): "bhSetSize",
+}
 
 
 class Elf:
@@ -86,7 +101,8 @@ class Elf:
             off = symtab["offset"] + i * symtab["entsize"]
             name, value, size, info, other, shndx = struct.unpack_from(">IIIBBH", self.data, off)
             yield dict(index=i, off=off, name=self._cstr(strtab["offset"] + name), value=value,
-                       size=size, bind=info >> 4, type=info & 0xF, shndx=shndx)
+                       size=size, bind=info >> 4, type=info & 0xF, shndx=shndx,
+                       name_at=strtab["offset"] + name)
 
     def set_size(self, sym, size):
         struct.pack_into(">I", self.data, sym["off"] + 8, size)
@@ -177,6 +193,26 @@ def main() -> int:
         print(__doc__)
         return 2
     elf = Elf(bytearray(open(sys.argv[1], "rb").read()))
+    syms = list(elf.symbols())
+
+    # 0. Game functions under a libultra name.
+    for (old, addr, size), new in MISNAMED.items():
+        assert len(new) <= len(old)
+        hits = [s for s in syms if s["name"] == old and s["type"] == STT_FUNC]
+        if not hits:
+            print(f"  misnamed {old}: not present (already renamed or a different decomp revision)")
+            continue
+        s = hits[0]
+        if len(hits) != 1 or s["value"] != addr or s["size"] != size:
+            print(f"  ERROR: {old} is not the expected game function at 0x{addr:08X} (size {size})")
+            return 1
+        # The string must be this symbol's alone: no other symbol may point into it.
+        shared = [t for t in syms if t is not s and s["name_at"] <= t["name_at"] < s["name_at"] + len(old)]
+        if shared:
+            print(f"  ERROR: {old}'s name string is shared with {shared[0]['name']}")
+            return 1
+        elf.data[s["name_at"]:s["name_at"] + len(old)] = new.encode("ascii").ljust(len(old), b"\0")
+        print(f"  misnamed {old} at 0x{addr:08X} -> {new} (a game function, not libultra's)")
     syms = list(elf.symbols())
 
     code = {i for i, s in enumerate(elf.sections)
