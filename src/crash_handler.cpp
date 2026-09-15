@@ -24,6 +24,7 @@
 #include <chrono>
 #include <mutex>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -63,9 +64,54 @@ const char* exception_name(DWORD code) {
     }
 }
 
+// ---- stale reads in the RDRAM reservation (see bh::set_rdram_for_fault_handling) ----
+std::atomic<uintptr_t> g_rdram_base{ 0 };
+constexpr uintptr_t kRdramMapped = 8u * 1024u * 1024u;          // librecomp mem_size
+constexpr uintptr_t kRdramReserved = 4096ull * 1024ull * 1024ull; // librecomp allocation_size
+
+bool strict_memory() {
+    static const bool strict = [] {
+        const char* v = std::getenv("BH_STRICT_MEMORY");
+        return v != nullptr && *v != '\0' && *v != '0';
+    }();
+    return strict;
+}
+
+// A read of an address inside the reservation but outside real RAM: map that one
+// page read-only (zeros) and carry on. Returns true when the fault was handled.
+bool map_stale_read(const EXCEPTION_RECORD* record) {
+    if (record->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || record->NumberParameters < 2 ||
+        record->ExceptionInformation[0] != 0 || strict_memory()) {
+        return false;
+    }
+    const uintptr_t base = g_rdram_base.load(std::memory_order_relaxed);
+    const uintptr_t address = static_cast<uintptr_t>(record->ExceptionInformation[1]);
+    if (base == 0 || address < base + kRdramMapped || address >= base + kRdramReserved) {
+        return false;
+    }
+    const uintptr_t page = address & ~static_cast<uintptr_t>(0xFFF);
+    DWORD old_protect = 0;
+    if (VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_READONLY, &old_protect) == 0) {
+        return false;
+    }
+    static std::atomic<int> reported{ 0 };
+    if (reported.fetch_add(1) < 32) {
+        const uint32_t n64 = static_cast<uint32_t>(address - base + 0x80000000u);
+        std::fprintf(stderr, "[bh] stale read of unmapped N64 address 0x%08X, by:\n", n64);
+        describe_one_address("", record->ExceptionAddress);
+        std::fprintf(stderr, "[bh]   that page now reads as zeros (BH_STRICT_MEMORY=1: crash instead)\n");
+        std::fflush(stderr);
+    }
+    return true;
+}
+
 LONG WINAPI on_exception(EXCEPTION_POINTERS* info) {
     const EXCEPTION_RECORD* record = info->ExceptionRecord;
     const DWORD code = record->ExceptionCode;
+
+    if (map_stale_read(record)) {
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
 
     // Only report faults that actually kill the process. Debug breakpoints and
     // C++ exceptions pass through here too and are not interesting.
@@ -398,6 +444,10 @@ extern "C" void bh_report_lookup_miss(unsigned int addr, void* return_address) {
 
 namespace bh {
 
+void set_rdram_for_fault_handling(uint8_t* rdram) {
+    g_rdram_base.store(reinterpret_cast<uintptr_t>(rdram), std::memory_order_relaxed);
+}
+
 void install_crash_handler() {
     AddVectoredExceptionHandler(1, on_exception);
 
@@ -460,10 +510,15 @@ void install_crash_handler() {
 // recompiled microcode that spins forever, and rebuilding it on POSIX timers
 // is work for the day that actually happens on Linux or macOS.
 
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <csignal>
 #include <cstring>
 #include <execinfo.h>
+#include <sys/mman.h>
+#include <ucontext.h>
 #include <initializer_list>
 #include <link.h>
 #include <unistd.h>
@@ -499,7 +554,38 @@ void write_hex(const char* label, uintptr_t value) {
     write_str(p);
 }
 
-void on_fault(int sig, siginfo_t* info, void*) {
+// Stale reads in the RDRAM reservation (bh::set_rdram_for_fault_handling): map
+// the page read-only and return, so the instruction reads zeros. Writes (x86-64
+// page-fault error bit 1) still crash. mprotect is async-signal-safe.
+std::atomic<uintptr_t> g_rdram_base{ 0 };
+bool g_strict_memory = false;
+constexpr uintptr_t kRdramMapped = 8u * 1024u * 1024u;
+constexpr uintptr_t kRdramReserved = 4096ull * 1024ull * 1024ull;
+
+bool map_stale_read(int sig, siginfo_t* info, void* context) {
+    if (sig != SIGSEGV || g_strict_memory) return false;
+    const uintptr_t base = g_rdram_base.load(std::memory_order_relaxed);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(info->si_addr);
+    if (base == 0 || address < base + kRdramMapped || address >= base + kRdramReserved) return false;
+#if defined(__x86_64__)
+    const auto* uc = static_cast<ucontext_t*>(context);
+    if ((uc->uc_mcontext.gregs[REG_ERR] & 2) != 0) return false;   // a write
+#else
+    (void)context;
+    return false;
+#endif
+    const uintptr_t page = address & ~static_cast<uintptr_t>(0xFFF);
+    if (mprotect(reinterpret_cast<void*>(page), 0x1000, PROT_READ) != 0) return false;
+    static std::atomic<int> reported{ 0 };
+    if (reported.fetch_add(1) < 32) {
+        write_hex("[bh] stale read of unmapped N64 address (page now zeros; BH_STRICT_MEMORY=1: crash) ",
+                  static_cast<uint32_t>(address - base + 0x80000000u));
+    }
+    return true;
+}
+
+void on_fault(int sig, siginfo_t* info, void* context) {
+    if (map_stale_read(sig, info, context)) return;
     write_str(sig == SIGSEGV ? "\n[bh] SIGSEGV\n" : sig == SIGBUS ? "\n[bh] SIGBUS\n" : "\n[bh] SIGFPE/SIGILL\n");
     write_hex("[bh] accessing ", reinterpret_cast<uintptr_t>(info->si_addr));
     write_hex("[bh] executable base ", g_exe_base);
@@ -513,6 +599,12 @@ void on_fault(int sig, siginfo_t* info, void*) {
 }  // namespace
 
 namespace bh {
+
+void set_rdram_for_fault_handling(uint8_t* rdram) {
+    const char* v = std::getenv("BH_STRICT_MEMORY");
+    g_strict_memory = v != nullptr && *v != '\0' && *v != '0';
+    g_rdram_base.store(reinterpret_cast<uintptr_t>(rdram), std::memory_order_relaxed);
+}
 
 void install_crash_handler() {
     dl_iterate_phdr([](dl_phdr_info* info, size_t, void*) {

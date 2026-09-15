@@ -127,6 +127,39 @@ any other timer fires up to 1 ms early. Linux waits in nanoseconds, so the platf
 
 **Found during the test, separate:** entering a building crashes (next section).
 
+## Entering a building
+
+**Reported:** "The crashing happens when opening a door of a house."
+
+**Crash 1:**
+- `ACCESS_VIOLATION` in `recomp::do_rom_read` under `osPiStartDma`, reached from the loader
+  `func_800101F0` ← `func_800105F0_111F0` ← the inside overlay's `loadLevel`.
+- `BH_DEBUG_LOADS=1`: overlay `gameplay_inside`, data `0x7E6E50 → 0x802F2EF0`,
+  `0x37F840 → 0x800D6460`, then **`0x38F640 → 0x00000001` (4 bytes)**.
+- Cause: the game's own code. `func_800105F0_111F0` (core `loader.c`, matching) loads four bytes to
+  `*sp28` and returns them, and never sets `sp28`: `lw $a0, 0x28($sp)`.
+- On the console that slot holds an address left by an earlier call. In the port the runtime's native
+  libultra functions never write the MIPS stack, so it held 1.
+- Fix: a wrapper puts a pointer to scratch `0x807EF068` into that slot before the call
+  (`BH_NO_LOADER_SLOT=1`: off). The value returned is the four bytes read, as on the console.
+
+**Crash 2** (Daniel: "went a step further by showing a black screen"):
+- `ACCESS_VIOLATION` reading in `func_800881C0_170280` + 0x826 (inside overlay, effect billboards),
+  from `func_8008B1A8_173268` ← `loadLevel`.
+- Decomp: `var_s3 = spAC;` with `spAC` never set, then `var_s3->unk9` on the first pass. The value is
+  overwritten later in the loop, so the console only needs the stale pointer to be readable.
+
+Two uninitialised stack reads in one interior load suggested more. Rather than seed each one:
+- librecomp reserves 4 GB for RDRAM and maps only the 8 MB of real RAM, so a stale pointer faults
+  (Windows `PAGE_NOACCESS`, Linux `PROT_NONE`).
+- The crash handler now maps just the faulting 4 KB page read-only (zeros) when a **read** lands
+  inside that reservation, logs it once per page with the reading function, and continues. A write
+  there still crashes. `BH_STRICT_MEMORY=1`: crash on any access, as before.
+
+**Result:** Daniel entered a house, walked around and left: "That works". The log shows the loader
+slot used and exactly one stale read, `N64 address 0xE700000A` from `func_800881C0_170280 + 0x826`.
+The slot held a leftover display-list word, `0xE7000000` (`G_RDPPIPESYNC`), plus the field offset.
+
 ## The map crash
 
 **Reported:** "The game crashed due to opening the map" (START in gameplay).

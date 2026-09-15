@@ -38,6 +38,14 @@ inference is marked *inferred*.
 
 ## Loading
 
+**Reads of uninitialised stack variables** (harmless on the console, where the slots hold stale valid
+addresses):
+- `func_800105F0_111F0` (the interior loader, called by the inside overlay's `loadLevel`) loads four bytes
+  to its never-set `sp28` and returns them.
+- `func_800881C0_170280` (interior effect billboards) reads `spAC->unk9` before setting `spAC`.
+
+See PORTING.md for what the port does about them.
+
 `func_800101F0_10DF0(dest, rom, size)` → `func_8000FFC0_10BC0(&D_80067F70, dest, rom, size)`: DMAs
 `0x800` bytes at a time with `osPiStartDma` and waits on `D_80067F70` after each. Callers:
 `loadFrontendData`, `func_80011674_12274` (outside), `func_800117D8_123D8` (inside), `loadLevelCode(level)`

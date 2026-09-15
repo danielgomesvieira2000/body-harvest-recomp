@@ -221,6 +221,7 @@ void on_init(uint8_t* rdram, recomp_context* ctx) {
     std::printf("[bh] rdram base = %p\n", static_cast<void*>(rdram));
     std::fflush(stdout);
     bh::set_rdram_base(rdram);
+    bh::set_rdram_for_fault_handling(rdram);
     // Must happen here: init_overlays() clears the function map, and librecomp
     // calls it long before this hook.
     bh::register_runtime_functions();

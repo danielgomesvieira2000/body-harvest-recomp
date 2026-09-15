@@ -111,6 +111,7 @@ left out. Differences that matter:
 | `0x80700000`–`0x80780000` | HUD rewriter copies (two 256 KB buffers) |
 | `0x80780000`–`0x80780040` | identity matrix the rewriter's model and shadow groups multiply by |
 | `0x807EF000`–`0x807EF064` | controller-latency timer + queue |
+| `0x807EF068`–`0x807EF06C` | destination for the building loader's never-set pointer |
 | `0x807F0000`–`0x80800000` | audio command-list private copy |
 
 ## libultra the runtime owns, and what it forgot
@@ -133,6 +134,16 @@ fixed in `src/libultra_glue.cpp`:
 
 General lesson: a libultra function the runtime owns by name loses every side effect the cartridge's
 body had; an unnamed routine that depended on it hangs far from the cause.
+
+**Symptom: entering a building crashes** (first in `recomp::do_rom_read`, then reading in
+`func_800881C0_170280`). The game reads uninitialised stack variables whose leftover values are valid
+addresses on the console but not in the port, because the runtime's native functions never write the
+MIPS stack. Two fixes:
+1. `src/libultra_glue.cpp` seeds `func_800105F0_111F0`'s never-set destination slot with scratch
+   `0x807EF068` (`BH_NO_LOADER_SLOT=1`: off).
+2. `src/crash_handler.cpp` maps a page of zeros, read-only, when a read faults inside the unmapped part
+   of librecomp's 4 GB RDRAM reservation, logging `stale read of unmapped N64 address …` once per page.
+   Writes still crash. `BH_STRICT_MEMORY=1` restores crash-on-any-access.
 
 ## Audio
 
@@ -300,6 +311,7 @@ Rerun it after any submodule update.
 | `BH_NO_SHADOW_INTERP=1` / `BH_SHADOW_TRACE=1` | the player's shadow steps at the game's rate / how often it is found |
 | `BH_NO_RETICLE_INTERP=1` | the aiming reticle steps at the game's rate |
 | `BH_NO_HUD_ANCHORS=1` | radar, bars and weapon panel stay in the 4:3 middle |
+| `BH_NO_LOADER_SLOT=1` / `BH_STRICT_MEMORY=1` | leave the building loader's destination unseeded (crashes on entering) / crash on any read of unmapped N64 memory |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs

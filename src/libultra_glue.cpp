@@ -155,11 +155,51 @@ void os_cont_start_read_data_glue(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// ---- the building loader's uninitialised pointer ---------------------------
+//
+// Symptom: entering a building (opening a house door) crashes in
+// recomp::do_rom_read. BH_DEBUG_LOADS=1: the inside overlay loads, then data
+// "0x38F640 -> 0x00000001 (0x4 bytes)".
+//
+// Cause: the game's own code. func_800105F0_111F0 (core loader.c, a matching
+// function), called by the inside overlay's loadLevel, loads four bytes into
+// *sp28 and returns them -- and never sets sp28: `lw $a0, 0x28($sp)` passes
+// whatever that stack slot holds as the destination. On the console the slot
+// holds an address left there by an earlier call, and the four bytes land
+// somewhere harmless. In the port the runtime's native libultra functions never
+// write the MIPS stack, so the slot holds something else: here 1.
+//
+// Fix: before the call, put a pointer to four bytes of port scratch RDRAM into
+// the slot its frame will use (caller's sp - 0x38 + 0x28). The value returned is
+// what the console returns -- the four bytes read -- and nothing of the game's is
+// overwritten. BH_NO_LOADER_SLOT=1: off.
+constexpr uint32_t kBuildingLoader = 0x800105F0;
+constexpr uint32_t kLoaderSlotTarget = 0x807EF068;   // scratch, 4 bytes
+extern "C" void func_800105F0_111F0(uint8_t* rdram, recomp_context* ctx);
+
+void building_loader_with_slot(uint8_t* rdram, recomp_context* ctx) {
+    MEM_W(-0x38 + 0x28, ctx->r29) = static_cast<int32_t>(kLoaderSlotTarget);
+    func_800105F0_111F0(rdram, ctx);
+    static bool reported = false;
+    if (!reported) {
+        reported = true;
+        std::fprintf(stderr, "[bh] building loader: its uninitialised destination points at scratch 0x%08X (BH_NO_LOADER_SLOT=1: off)\n",
+                     kLoaderSlotTarget);
+        std::fflush(stderr);
+    }
+}
+
 }  // namespace
 
 namespace bh {
 
 void install_libultra_glue() {
+    {
+        const char* v = std::getenv("BH_NO_LOADER_SLOT");
+        if (!(v != nullptr && *v != '\0' && *v != '0')) {
+            recomp::overlays::add_loaded_function(static_cast<int32_t>(kBuildingLoader), building_loader_with_slot);
+        }
+    }
     recomp::overlays::add_loaded_function(static_cast<int32_t>(kOsContInit), os_cont_init_glue);
     recomp::overlays::add_loaded_function(static_cast<int32_t>(kOsContStartReadData), os_cont_start_read_data_glue);
 }
