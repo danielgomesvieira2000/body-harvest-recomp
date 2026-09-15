@@ -35,12 +35,30 @@ and the switch that re-derives it; keep negative results; mark inference as infe
 
 | Directory | What |
 |---|---|
-| `build/` | Windows, clang-cl + Ninja, RelWithDebInfo (Debug breaks audio timing) |
+| `build/` | Windows, clang-cl + Ninja, RelWithDebInfo, `BH_WITH_RUNTIME/RECOMPILED/FRONTEND=ON` (Debug breaks audio timing) |
 | `build-linux/` | Linux / WSL (`tools/build_linux.sh`) |
 | `lib/N64ModernRuntime/N64Recomp/build-linux/` | N64Recomp + RSPRecomp, built under WSL (`tools/wsl_build_recompiler.sh`) |
+| `~/.cache/body-harvest-recomp/decomp` (WSL) | mirror of `lib/bh-decomp` where the decompilation is built |
+| `elf/` | `bh.us.elf` (as built), `bh.us.fixed.elf` (what N64Recomp reads) |
 
-Regenerate after a submodule or config change: `python tools/patch_all.py`, then
-`wsl -d Ubuntu -- bash tools/recompile.sh`, then rebuild.
+Regenerate everything from the dump: `wsl -d Ubuntu -e bash tools/regenerate.sh` (decomp build → `fix_elf.py`
+→ `verify_elf.py` → N64Recomp/RSPRecomp, with counts). After a `recomp/*.toml` change only
+`wsl -d Ubuntu -e bash tools/recompile.sh`. After a submodule update: `python tools/patch_all.py`.
+
+Test runs: `python tools/test_sandbox.py --exe build/body-harvest-recomp.exe --rom rom.z64 --seconds N
+--grab 10,20 --burst 30,60 --out <dir> --seed tools/test-seeds/graphics.json --env BH_INPUT_SCRIPT=...`
+(a throwaway copy; `--grab`/`--burst` use PrintWindow, so covered windows photograph correctly).
+
+## Port-specific facts worth knowing first
+
+- **Every call goes through the function lookup** (`use_lookup_for_all_function_calls`): a native
+  function registered at a cartridge address replaces the game's for every caller. Wrappers on
+  functions inside an overlay must be re-registered from `bh::overlay_loaded` after each load.
+- **libultra the runtime owns loses its side effects** (`src/libultra_glue.cpp`): `osContInit` did not
+  create `__osEepromTimerQ`; SI completes instantly, which starves lower-priority game threads.
+- **Graphics microcode is F3DEX 1.x** (Fast3D numbering), not F3DEX2: `include/bh/gbi_f3dex.h`.
+- **Gameplay renders 320×240 by our change** (`setGameplayResolution` → `setFullResolution`); the game
+  itself would draw 304×230 and stretch it with the VI scale, which nothing here emulates.
 
 ## Environment variables
 

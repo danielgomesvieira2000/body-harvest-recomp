@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# One-time preparation for a Linux build: distribution packages, the splat
-# virtual environment and the submodules. From Pilotwings 64: Recompiled's script.
+# One-time preparation for a Linux build: distribution packages and the
+# submodules. From Pilotwings 64: Recompiled's script. The decomp's own Python
+# environment is created by tools/wsl_build_elf.sh on its first run.
 #
 # What each package is for:
 #
 #   clang, lld            the port (N64Recomp's output is validated against Clang;
 #                         GCC is never used, docs/PLAN.md).
 #   cmake, ninja-build, pkg-config   the build.
-#   python3, python3-venv the pipeline's tools and splat.
-#   binutils-mips-linux-gnu  assembling and linking the ELF from splat's output.
+#   python3, python3-venv the pipeline's tools and the decomp's build (splat).
+#   binutils-mips-linux-gnu  the decomp's assembler and linker.
+#   rsync                 mirroring lib/bh-decomp to where it is built.
 #   libsdl2-dev           the window, the pad and the audio device.
 #   libfreetype-dev       RmlUi's font engine, under recompui.
 #   libgtk-3-dev          nativefiledialog-extended, the dump picker.
@@ -26,7 +28,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PACKAGES=(
     clang lld cmake ninja-build pkg-config git
-    python3 python3-venv binutils-mips-linux-gnu
+    python3 python3-venv binutils-mips-linux-gnu rsync
     libsdl2-dev libfreetype-dev libgtk-3-dev
     libvulkan-dev vulkan-tools mesa-vulkan-drivers
 )
@@ -72,13 +74,13 @@ else
     echo
 fi
 
-# ----------------------------------------------------------------- splat ----
-echo "=== splat (virtual environment) ==="
-bash "$REPO/tools/wsl_setup_splat.sh"
-
 # ------------------------------------------------------------ submodules ----
 echo "=== submodules ==="
-git -C "$REPO" submodule update --init --recursive
+# Not --recursive across everything: lib/bh-decomp records a gitlink (tools/n64)
+# with no .gitmodules entry, and git refuses to recurse into it. The decomp needs
+# none of its own submodules to build (its tools are committed).
+git -C "$REPO" submodule update --init lib/bh-decomp
+git -C "$REPO" submodule update --init --recursive lib/N64ModernRuntime lib/RT64 lib/RecompFrontend
 
 echo
 echo "Ready. Next:"

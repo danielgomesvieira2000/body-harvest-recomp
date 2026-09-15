@@ -75,12 +75,8 @@ if [ $# -gt 0 ]; then
         cp "$dump" "$REPO/rom.z64"      # git-ignored; the RSP config reads it from here
     fi
     echo
-    echo "=== recompilers ==="
-    bash tools/wsl_build_recompiler.sh
-    echo
-    echo "=== unpack, split, ELF, recompile ==="
-    python3 tools/unpack_rom.py rom.z64
-    bash tools/regenerate.sh
+    echo "=== decomp ELF, recompilers, recompile ==="
+    bash tools/regenerate.sh rom.z64
 elif [ ! -f RecompiledFuncs/funcs.h ]; then
     echo "First build: pass your dump." >&2
     echo "    bash tools/build_linux.sh \"/path/to/Body Harvest (USA).z64\"" >&2
