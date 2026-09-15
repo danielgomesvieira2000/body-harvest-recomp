@@ -276,7 +276,7 @@ if(BH_WITH_RUNTIME AND BH_WITH_RECOMPILED)
                            src/libultra_stubs.cpp src/testdrive.cpp src/audiodiag.cpp
                            src/resample.cpp src/thread_sampler.cpp src/spin_yield.cpp
                            src/inspector.cpp src/mods.cpp src/calltrace.cpp src/libultra_glue.cpp
-                           src/dlcensus.cpp src/hudrewrite.cpp src/widescreen.cpp)
+                           src/dlcensus.cpp src/hudrewrite.cpp src/widescreen.cpp src/framestats.cpp)
     if(BH_WITH_FRONTEND)
         list(APPEND BH_SOURCES src/frontend.cpp)
     endif()

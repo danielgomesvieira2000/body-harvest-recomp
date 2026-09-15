@@ -22,10 +22,33 @@ PW_RENDERFULLCONTENT = 0x00000002
 
 
 def main() -> int:
+    if len(sys.argv) == 5 and sys.argv[1] == "--burst":
+        return burst(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
     if len(sys.argv) != 3:
         print(__doc__)
         return 2
-    out, pid = sys.argv[1], int(sys.argv[2])
+    return grab(sys.argv[1], int(sys.argv[2]))
+
+
+def burst(outdir: str, pid: int, count: int) -> int:
+    """    python tools/print_window.py --burst OUTDIR PID COUNT
+
+    COUNT grabs as fast as PrintWindow allows, saved as OUTDIR/tMMMMMM.jpg (ms since
+    the first), the naming tools/frame_motion.py reads."""
+    import os
+    import time
+    os.makedirs(outdir, exist_ok=True)
+    start = time.perf_counter()
+    for _ in range(count):
+        ms = int((time.perf_counter() - start) * 1000)
+        if grab(os.path.join(outdir, f"t{ms:06d}.jpg"), pid, quiet=True) != 0:
+            return 1
+    span = time.perf_counter() - start
+    print(f"{count} grabs in {span:.2f} s ({count / span:.1f} a second)")
+    return 0
+
+
+def grab(out: str, pid: int, quiet: bool = False) -> int:
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
     try:
@@ -78,7 +101,8 @@ def main() -> int:
     gdi32.DeleteObject(bitmap)
     gdi32.DeleteDC(hdc_mem)
     user32.ReleaseDC(hwnd, hdc_window)
-    print(f"{'printed' if ok else 'PrintWindow failed for'} window {w}x{h} -> {out}")
+    if not quiet or not ok:
+        print(f"{'printed' if ok else 'PrintWindow failed for'} window {w}x{h} -> {out}")
     return 0 if ok else 1
 
 

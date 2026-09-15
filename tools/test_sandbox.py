@@ -71,6 +71,8 @@ def main():
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--keep", action="store_true", help="leave the sandbox for inspection")
     ap.add_argument("--grab", default="", help="comma-separated seconds at which to grab the window")
+    ap.add_argument("--burst", default="", metavar="SECONDS,COUNT",
+                    help="at SECONDS, grab COUNT frames as fast as possible into --out/burst (frame_motion.py)")
     args = ap.parse_args()
 
     exe = args.exe.resolve()
@@ -113,6 +115,9 @@ def main():
                 proc = subprocess.Popen([str(sandbox_exe)] + ([rom] if rom else []), cwd=sandbox, env=env,
                                         stdout=log, stderr=subprocess.STDOUT)
                 grabs = sorted(float(s) for s in args.grab.split(",") if s.strip())
+                burst_at, burst_count = (float(args.burst.split(",")[0]), int(args.burst.split(",")[1]))                     if args.burst else (None, 0)
+                if burst_at is not None:
+                    grabs = sorted(grabs + [burst_at])
                 launched = time.time()
                 for at in grabs:
                     delay = at - (time.time() - launched)
@@ -120,6 +125,11 @@ def main():
                         time.sleep(delay)
                     if proc.poll() is not None:
                         break
+                    if at == burst_at and burst_count:
+                        subprocess.run([sys.executable, str(HERE / "print_window.py"), "--burst",
+                                        str(out / "burst"), str(proc.pid), str(burst_count)], check=False)
+                        burst_count = 0
+                        continue
                     png = out / f"grab_t{at:05.1f}s.png"
                     # The window's own contents (PrintWindow), so a covering window
                     # does not end up in the picture (tools/print_window.py).

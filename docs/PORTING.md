@@ -217,7 +217,8 @@ Rerun it after any submodule update.
 | `BH_AUTOSTART=1` | start the stored dump without the launcher |
 | `BH_DEBUG_LOADS=1` | log overlay and data loads |
 | `BH_TRACE_FUNCS=0xADDR,...` / `BH_TRACE_LIMIT=<n>` | print calls to resident/runtime functions with args and result |
-| `BH_FRAME_STATS=1` | display lists per 60 updates |
+| `BH_FRAME_STATS=1` | game frame rate (from `osViSwapBuffer`) vs presented rate, every 2 s |
+| `BH_PAIRING=1` | RT64 transform-pairing counters every 2 s |
 | `BH_SAMPLE=1` | thread sampler every 2 s (`tools/symbolize_log.py` resolves it) |
 | `BH_AUDIO_STATS=1` / `BH_AUDIO_DUMP` / `BH_AUDIO_HEADROOM_MS` / `BH_AUDIO_PERIOD` / `BH_AUDIO_NO_RESAMPLE` | audio diagnostics and knobs |
 | `BH_SI_LATENCY_MS=<n>` | controller transfer latency (default 1; 0 = immediate, which stalls boot) |
@@ -239,8 +240,17 @@ Rerun it after any submodule update.
   Seed the windowed `graphics.json`, or a clean profile opens fullscreen.
 - `tools/shoot_run.ps1`, `tools/boot_runs.ps1` run the real build and **write to the real settings
   folder**; clean up after them.
-- `tools/capture_frames.py` saved 0 frames of this window on the development laptop; `--grab` in
-  `test_sandbox.py` (GDI window grab by process id) is what worked.
+- `tools/capture_frames.py` saved 0 frames of this window on the development laptop. `test_sandbox.py
+  --grab 10,20` (single frames) and `--burst SECONDS,COUNT` (~30–36 a second, for
+  `tools/frame_motion.py`) use `tools/print_window.py` (PrintWindow with `PW_RENDERFULLCONTENT`), which
+  reads the window's own contents even when covered. Crop to the window size: the bitmap is the
+  DPI-virtualised client size.
+
+### Frame interpolation
+
+RT64 interpolates with no port-side matrix groups: gameplay 20 game frames/s presented at 60, about one
+unpaired transform per frame (`BH_PAIRING=1`); `frame_motion.py` on a burst while walking: 90 % of pairs
+change under Framerate Display vs 47 % under Original (docs/findings/phase-08.md).
 
 ---
 

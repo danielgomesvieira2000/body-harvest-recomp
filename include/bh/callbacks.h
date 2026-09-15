@@ -52,6 +52,9 @@ void install_libultra_glue();
 // src/widescreen.cpp: game-side picture changes (full frame, widescreen view).
 // Called by register_runtime_functions.
 void install_widescreen();
+// src/framestats.cpp: game frame rate vs presented rate (BH_FRAME_STATS) and
+// interpolation pairing (BH_PAIRING). Called by register_runtime_functions.
+void install_frame_stats();
 // Re-registers game-side wrappers that live in an overlay, after it loads
 // (recomp/overlays.txt order). Called by src/overlays.cpp.
 void overlay_loaded(size_t overlay_id);

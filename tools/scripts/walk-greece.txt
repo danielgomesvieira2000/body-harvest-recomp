@@ -1,0 +1,58 @@
+# Unattended: through the intro, title, slot select, name entry, difficulty and the opening
+# dialogue (START, then A), then walk forward and turn in Greece. For motion measurements
+# (docs/findings/phase-08.md). <start s> <end s> <buttons> [stick_x stick_y] [# note]
+6.0 6.2 START
+9.0 9.2 START
+12.0 12.2 START
+15.0 15.2 START
+18.0 18.2 START
+21.0 21.2 START
+24.0 24.2 START
+27.0 27.2 START
+30.0 30.2 START
+33.0 33.2 A
+36.0 36.2 START
+39.0 39.2 A
+42.0 42.2 START
+45.0 45.2 A
+48.0 48.2 START
+51.0 51.2 A
+54.0 54.2 START
+57.0 57.2 A
+58.5 58.7 A
+60.0 60.2 A
+61.5 61.7 A
+63.0 63.2 A
+64.5 64.7 A
+66.0 66.2 A
+67.5 67.7 A
+69.0 69.2 A
+70.5 70.7 A
+72.0 72.2 A
+73.5 73.7 A
+75.0 75.2 A
+76.5 76.7 A
+78.0 78.2 A
+79.5 79.7 A
+81.0 81.2 A
+82.5 82.7 A
+84.0 84.2 A
+85.5 85.7 A
+87.0 87.2 A
+88.5 88.7 A
+90.0 90.2 A
+91.5 91.7 A
+93.0 93.2 A
+94.5 94.7 A
+96.0 96.2 A
+97.5 97.7 A
+99.0 99.2 A
+100.5 100.7 A
+102.0 102.2 A
+103.5 103.7 A
+105.0 105.2 A
+106.5 106.7 A
+108.0 108.2 A
+109.5 109.7 A
+112.0 125.0 - 0 70   # walk forward
+125.0 140.0 - 60 50  # walk while turning right

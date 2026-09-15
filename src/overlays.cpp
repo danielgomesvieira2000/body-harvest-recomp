@@ -200,6 +200,7 @@ void register_runtime_functions() {
     install_libultra_glue();
     // Game-side picture changes (src/widescreen.cpp).
     install_widescreen();
+    install_frame_stats();
 
     // Last, so nothing above overwrites it.
     recomp::overlays::add_loaded_function(static_cast<int32_t>(kLoaderAddress), loader_hook);

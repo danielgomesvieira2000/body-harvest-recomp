@@ -6,13 +6,16 @@ under *Departures* rather than rewriting the text. What was found goes in [findi
 reference someone else can use goes in [PORTING.md](PORTING.md) (port facts) and
 [GAME-INTERNALS.md](GAME-INTERNALS.md) (game facts).
 
-**Status:** phases 00-04 done 2026-09-15 (boots to Greece gameplay); 05 measured, awaiting Daniel's
-playtest; 06 next. The session runs **autonomously** (Daniel: `/new-port
+**Status (2026-09-15):** 00-04 done (boots to Greece gameplay); 05, 06, 07, 08 done as far as
+measurable without a person — each awaits Daniel's playtest items (listed in its findings); 09 (Linux,
+docs, packaging) next. No repository or release has been created (D10). The session runs **autonomously** (Daniel: `/new-port
 Body_Harvest rom.z64 autonomous`): at each choice the recommended option is taken and logged under
 *Decisions*.
 
 > **Departures from this plan** (added as they happen):
 >
+> - *Phases 07 and 08 before 06's gate*: their measurements need no one; the HUD classes and the
+>   motion artefacts need Daniel at the F1 panel and in play, asked for in the same playtest.
 > - *Phase 05 → 06 order*: phase 05's exit is a playtest by Daniel (rumble, pitch, a building, a level
 >   change). Everything measurable without him is done ([findings/phase-05.md](findings/phase-05.md)).
 >   Phase 06 starts before that gate so the playtest uses the real launcher and settings; the phase 05
