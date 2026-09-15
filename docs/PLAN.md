@@ -213,4 +213,6 @@ game data.
 | 2026-09-15 | `52a12ed` | same | Rumble felt and correct |
 | 2026-09-15 | `b21787b` | same | Aiming reticle steady while aiming |
 | 2026-09-15 | `2f7efea` | same | Pause map opens without crashing |
+| 2026-09-15 | `da84d95` | same + `patch_runtime_timer.py` | Rumble timing correct with the controller loop at ~285 passes/s |
+| 2026-09-15 | `dfdf975` | same | Entering a house, walking inside and leaving works |
 | 2026-09-15 | `d7d3049` | same | Radar right, health/alien bars and weapon panel left at 16:9; Linux build runs to gameplay and the pause map (WSLg) |
