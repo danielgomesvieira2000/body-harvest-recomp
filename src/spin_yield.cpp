@@ -7,16 +7,10 @@
 // "Threads and cooperative scheduling"; hit by Rayman 2, Beetle Adventure Racing
 // and Pilotwings 64 before this port).
 //
-// Body Harvest's main loop ends each frame in a frame limiter that polls the
-// clock until enough time has passed (func_80001454, 0x80001A88-0x80001B18):
-//
-//     target = func_80133AA0();
-//     do { elapsed = (osGetTime() - start) * 64 / 3000 / k; } while (elapsed < target);
-//
-// osGetTime calls nothing that yields. recomp/body-harvest.us.toml hooks the top
-// of that loop to call this, which does what the counter interrupt would have:
-// deliver a pending external message and let a higher-priority runnable thread
-// run.
+// Body Harvest's busy waits, where measured, are listed with their hooks in
+// recomp/body-harvest.us.toml; each hook calls this, which does what the counter
+// interrupt would have: deliver a pending external message and let a
+// higher-priority runnable thread run.
 //
 // Taken from Rayman 2: Recompiled (src/spin_yield.cpp), including its measured
 // choice of a 1 ms bounded wait over a hot poll (a hot poll starved the native

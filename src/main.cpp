@@ -224,6 +224,7 @@ void on_init(uint8_t* rdram, recomp_context* ctx) {
     // Must happen here: init_overlays() clears the function map, and librecomp
     // calls it long before this hook.
     bh::register_runtime_functions();
+    bh::install_call_traces();
 }
 
 void on_thread_create(uint8_t* rdram, recomp_context* ctx) {
@@ -331,6 +332,13 @@ int run(int argc, char** argv, const char* rom_arg) {
     config.events_callbacks = bh::events_callbacks();
     config.error_handling_callbacks = bh::error_handling_callbacks();
     config.threads_callbacks = bh::threads_callbacks();
+
+    // Per event source, whether a message that finds its queue full is retried or
+    // dropped. Nothing upstream installs this, and the bitset it fills starts
+    // all-clear, so without the call every source is dropped -- fatal for a
+    // one-message-per-frame handshake (Rayman 2, playbook 05). The struct's own
+    // defaults: requeue timer, SP, SI, DP; drop AI, VI, PI.
+    ultramodern::set_message_queue_control(ultramodern::MessageQueueControl{});
 
     // start_game() before start(): start() enters its main loop and does not return
     // until the user quits (Wave Race, playbook 05).

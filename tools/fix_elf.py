@@ -26,6 +26,17 @@ that byte identity cannot see (playbook 02):
    ROM range holds the offset in its name (or the only code section holding its
    vram). One that fits neither is an error (the function would be missing).
 
+3. **Code no symbol covers.** libultra objects linked from the decomp's archive
+   keep their `static` functions unnamed (bnkf.o's patch helpers, for one), so
+   the bytes between one FUNC's end and the next FUNC's start are code N64Recomp
+   never sees. A call into one fails at run time ("Failed to find function at
+   0x8001F8B0", from alBnkfNew). Every referenced one has an ABS NOTYPE name from
+   undefined_syms (`func_8001F8B0 = 0x8001F8B0;`); each such name that lands in an
+   uncovered gap of exactly one code section is rebound there as a FUNC, sized to
+   the next boundary with trailing zero words dropped. A gap with non-zero bytes
+   before its first name, or with no name at all, is reported (exit 1 unless its
+   words are all `jr $ra; nop` pairs -- empty static functions nothing calls).
+
 Also reported and resolved: two FUNC symbols at one address in one section.
 The one with a non-zero size (else the global one, else the first) stays FUNC;
 the others become NOTYPE, so N64Recomp emits the function once.
@@ -103,6 +114,62 @@ class Elf:
     def set_type(self, sym, typ):
         info = (sym["bind"] << 4) | typ
         struct.pack_into(">B", self.data, sym["off"] + 12, info)
+
+
+def fill_gaps(elf, code, demoted) -> int:
+    syms = list(elf.symbols())
+    names = defaultdict(list)
+    for s in syms:
+        if s["shndx"] == SHN_ABS and s["type"] == STT_NOTYPE and re.match(r"^func_[0-9A-F]{8}$", s["name"]):
+            names[s["value"]].append(s)
+    bad = 0
+    filled = 0
+    for i in sorted(code):
+        sec = elf.sections[i]
+        funcs = sorted((s["value"], s["size"]) for s in syms
+                       if s["shndx"] == i and s["type"] == STT_FUNC and s["index"] not in demoted)
+        objects = sorted(s["value"] for s in syms if s["shndx"] == i and s["type"] == STT_OBJECT)
+        for (a, size), (b, _) in zip(funcs, funcs[1:]):
+            lo, hi = a + size, b
+            if lo >= hi:
+                continue
+            def word(addr):
+                off = sec["offset"] + (addr - sec["addr"])
+                return struct.unpack_from(">I", elf.data, off)[0]
+            words = [word(x) for x in range(lo, hi, 4)]
+            if not any(words):
+                continue
+            starts = sorted(v for v in names if lo <= v < hi)
+            first_nonzero = lo + 4 * next(k for k, w in enumerate(words) if w)
+            if not starts or starts[0] > first_nonzero:
+                # Code before the first referenced name. Acceptable only if it is
+                # nothing but empty functions (jr $ra; nop) that nobody calls.
+                end = starts[0] if starts else hi
+                chunk = [word(x) for x in range(first_nonzero, end, 4)]
+                empties = len(chunk) % 2 == 0 and all(
+                    chunk[k] == 0x03E00008 and chunk[k + 1] == 0 for k in range(0, len(chunk), 2))
+                trailing_zero = all(w == 0 for w in chunk)
+                if not (empties or trailing_zero):
+                    print(f"  ERROR: {sec['name']} 0x{first_nonzero:08X}-0x{end:08X}: code no symbol names")
+                    bad += 1
+                elif empties:
+                    print(f"  gap {sec['name']} 0x{first_nonzero:08X}-0x{end:08X}: {len(chunk) // 2} empty"
+                          f" function(s), unreferenced -- left out")
+            bounds = starts + [hi] + [o for o in objects if lo < o < hi]
+            for v in starts:
+                end = min(x for x in bounds if x > v)
+                while end > v + 4 and word(end - 4) == 0:
+                    end -= 4
+                if word(end - 4) == 0x03E00008 and end < hi:
+                    end += 4  # the trimmed nop was jr $ra's delay slot
+                sym = names[v][0]
+                elf.set_type(sym, STT_FUNC)
+                elf.set_shndx(sym, i)
+                elf.set_size(sym, end - v)
+                filled += 1
+                print(f"  gap {sec['name']}: {sym['name']} -> FUNC, 0x{end - v:X} bytes (unnamed static in the decomp's archive)")
+    print(f"filled {filled} uncovered functions from undefined_syms names; {bad} gaps unresolved")
+    return bad
 
 
 def main() -> int:
@@ -195,6 +262,11 @@ def main() -> int:
         elf.set_size(s, size)
         fixed += 1
     print(f"sized {fixed} zero-size FUNC symbols; handled {len(abs_funcs)} ABS ({len(rebound)} rebound) and {len(demoted)} duplicates")
+
+    # 4. Uncovered code between functions.
+    gap_bad = fill_gaps(elf, code, demoted)
+    if gap_bad:
+        return 1
 
     # End state, re-read from the patched bytes.
     after = [s for s in Elf(elf.data).symbols() if s["type"] == STT_FUNC]

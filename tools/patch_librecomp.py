@@ -33,12 +33,12 @@ ANCHOR = """extern "C" recomp_func_t * get_function(int32_t addr) {
         fprintf(stderr, "Failed to find function at 0x%08X\\n", addr);"""
 
 REPLACEMENT = """// Implemented by the project; reports the caller and thread of a failed lookup.
-extern "C" void wr64_report_lookup_miss(unsigned int addr, void* return_address);
+extern "C" void bh_report_lookup_miss(unsigned int addr, void* return_address);
 
 extern "C" recomp_func_t * get_function(int32_t addr) {
     auto func_find = func_map.find(addr);
     if (func_find == func_map.end()) {
-        wr64_report_lookup_miss((unsigned int)addr, __builtin_return_address(0));
+        bh_report_lookup_miss((unsigned int)addr, __builtin_return_address(0));
         fprintf(stderr, "Failed to find function at 0x%08X\\n", addr);"""
 
 
@@ -48,7 +48,7 @@ def main():
 
     text = TARGET.read_text()
 
-    if "wr64_report_lookup_miss" in text:
+    if "bh_report_lookup_miss" in text:
         print(f"  {TARGET.name} already patched")
         return
 

@@ -45,4 +45,12 @@ void register_overlays();
 void register_runtime_functions();
 size_t code_section_count();
 
+// src/libultra_glue.cpp: state the runtime's libultra does not create but the
+// game's own libultra code needs. Called by register_runtime_functions.
+void install_libultra_glue();
+
+// src/calltrace.cpp: BH_TRACE_FUNCS=addr,... wraps those game addresses and prints
+// each call's arguments and result. Call from on_init after every registration.
+void install_call_traces();
+
 }  // namespace bh

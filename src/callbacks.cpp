@@ -49,7 +49,6 @@
 #   include <recompinput/profiles.h>
 #   include <recompui/config.h>
 #endif
-#include "bh/controller_pak.h"
 #include "bh/testdrive.h"
 #include "bh/renderer.h"
 
@@ -268,15 +267,10 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     // reads SDL buttons itself silently ignores every rebinding. It returns the
     // stick already normalized, which is what the runtime wants (see the note
     // further down).
-    if (controller_num < 0 || controller_num >= 2) {
-        return false;
-    }
-    // Player one always exists, because a keyboard is always attached: the
-    // assignment gives player one the keyboard profile as well as whatever pad it
-    // has, and get_n64_input merges the two. Player two exists only once a second
-    // pad has been plugged in, or a test script drives it.
-    if (controller_num == 1 && !recompinput::players::get_player_is_assigned(1) &&
-        !bh::input_script_has_player_two()) {
+    // Body Harvest is one player. Player one always exists, because a keyboard
+    // is always attached: single-player mode merges the keyboard profile with
+    // every connected pad (docs/PLAN.md D8).
+    if (controller_num != 0) {
         return false;
     }
 
@@ -399,10 +393,9 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
 #endif
 }
 
-// The runtime's rumble callback, and the port's. Body Harvest drives its Rumble
-// Pak through the joybus: src/si_pak.cpp serves the motor register beside the
-// Controller Pak (docs/PLAN.md D6) and calls bh::set_pak_rumble, on the game
-// thread that issued the SI transfer.
+// The runtime's rumble callback. Body Harvest drives a Rumble Pak through
+// osMotorStart/osMotorStop, which the runtime reimplements and routes here once
+// get_connected_device_info reports a Rumble Pak in the slot.
 void set_rumble(int controller_num, bool rumble) {
 #if BH_WITH_FRONTEND
     recompinput::set_rumble(controller_num, rumble);
@@ -416,25 +409,15 @@ void set_rumble(int controller_num, bool rumble) {
 }
 
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
-#if BH_WITH_FRONTEND
     // One controller in port 1, always: the keyboard plays when no pad is
-    // connected. It carries a Controller Pak, which is where the game saves:
-    // the status the runtime reports and the joybus answers in src/si_pak.cpp
-    // have to agree (playbook 05, "Two halves needed").
+    // connected. It carries a Rumble Pak -- the game saves to the cartridge's
+    // EEPROM, so the accessory slot is free for the motor. BH_NO_RUMBLE_PAK=1
+    // reports an empty slot instead (A/B switch).
     if (controller_num == 0) {
-        return { ultramodern::input::Device::Controller, ultramodern::input::Pak::ControllerPak };
+        static const bool no_rumble = std::getenv("BH_NO_RUMBLE_PAK") != nullptr;
+        return { ultramodern::input::Device::Controller,
+                 no_rumble ? ultramodern::input::Pak::None : ultramodern::input::Pak::RumblePak };
     }
-    // Player two, when there is one: a controller with nothing in its slot. The
-    // game saves only to controller 1's pak (its prompt says so).
-    if (controller_num == 1 && (recompinput::players::get_player_is_assigned(1) ||
-                                bh::input_script_has_player_two())) {
-        return { ultramodern::input::Device::Controller, ultramodern::input::Pak::None };
-    }
-#else
-    if (controller_num == 0) {
-        return { ultramodern::input::Device::Controller, ultramodern::input::Pak::ControllerPak };
-    }
-#endif
     return { ultramodern::input::Device::None, ultramodern::input::Pak::None };
 }
 
@@ -787,9 +770,10 @@ void set_frequency(uint32_t frequency) {
 // RSPRecomp from the cartridge (see recomp/aspMain.rsp.toml), and this returns
 // the real thing.
 
-// Where aspMain's text sits in RDRAM: ROM 0x37130 in the resident image
-// (docs/GAME-INTERNALS.md), which IPL3 loads to 0x80000400 + (0x37130 - 0x1000).
-constexpr uint32_t kAspMainTextStart = 0x80036530;
+// Where aspMain's text sits in RDRAM: ROM 0x2FF10 in the resident core segment
+// (D_8002F310 in the decomp's task setup, core/1050.c), which IPL3 loads to
+// 0x80000400 + (0x2FF10 - 0x1000).
+constexpr uint32_t kAspMainTextStart = 0x8002F310;
 
 // Retained for tasks that are not aspMain: reporting the task complete keeps
 // the game running, where returning nullptr would make librecomp print and
@@ -965,15 +949,11 @@ void bisect_audio_task(uint8_t* rdram, uint32_t ucode_addr) {
 }
 
 // Where the private copy of the command list lives: 0x807F0000, the top 64 KB of
-// the 8 MB the runtime reports.
-//
-// Not 0x80F00000, where Pilotwings 64: Recompiled put it: the runtime fork this
-// port uses bounds every RSP DMA to the 8 MB an N64 has (Rayman 2's fix, fork
-// commit fdfd82e), so a command list above 8 MB is read as nothing and every
-// audio task fails ("microcode DMA ... runs past the 8 MB", first boot of phase
-// 04). Below 8 MB, the game's own reservations end at 0x80796000 (file ids 6 and
-// 3, docs/GAME-INTERNALS.md). *Inferred* free above that: nothing in the file
-// table claims it; re-check if the game's hi-res mode or a heap reaches it.
+// the 8 MB the runtime reports. Body Harvest has no osMemSize reference and its
+// highest overlay data ends below 0x80400000 (docs/findings/phase-00.md), so the
+// upper 4 MB is *inferred* free, as it was for Wave Race 64. Kept below 8 MB
+// (Hybrid Heaven's choice) so the same address works on Daniel's runtime fork,
+// which refuses RSP DMAs above 8 MB.
 constexpr uint32_t kCommandListScratch = 0x807F0000u;
 constexpr uint32_t kCommandListScratchSize = 0x10000u;
 
@@ -1235,12 +1215,6 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     poll_input();
     bh::poll_game_state();
 
-    // Controller Pak writes go to disk from here, about once a second, never from
-    // the game thread (playbook 05, "Disk writes").
-    if (ticks % 60 == 0) {
-        bh::pak::flush();
-    }
-
     // Alt-tabbing away should not leave the game making noise behind another
     // window. The state is kept rather than acted on directly, so that the Sound
     // tab's setting can be turned off and take effect at once.
@@ -1254,7 +1228,7 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
         recompinput::set_rumble(0, false);
     }
     // recompinput ramps and decays the motor towards what the game last asked
-    // for through the Rumble Pak (src/si_pak.cpp); the library never calls this
+    // for through the Rumble Pak (osMotorStart/Stop); the library never calls this
     // itself, and without it set_rumble only sets a flag (Wave Race 64).
     recompinput::update_rumble();
     bh::frontend::maybe_autostart();
@@ -1291,10 +1265,6 @@ void set_audio_volume(double percent) {
                  clamped == 0 ? " -- the game will be silent until the Sound tab's"
                                 " Main Volume is raised" : "");
     std::fflush(stderr);
-}
-
-void set_pak_rumble(int port, bool on) {
-    set_rumble(port, on);
 }
 
 ultramodern::input::callbacks_t input_callbacks() {
@@ -1335,7 +1305,6 @@ ultramodern::renderer::callbacks_t renderer_callbacks() {
 // point with an access violation at an address in no loaded module, and the
 // first thing worth knowing is which of these it gets past.
 void shutdown_platform() {
-    bh::pak::flush();
     std::fprintf(stderr, "[bh] shutting down: controller\n");
     std::fflush(stderr);
     if (g_controller != nullptr) {
