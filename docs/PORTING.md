@@ -24,11 +24,12 @@ Pinned upstream revisions:
 3. [Recompiling](#recompiling)
 4. [The harness](#the-harness)
 5. [libultra the runtime owns, and what it forgot](#libultra-the-runtime-owns-and-what-it-forgot)
-6. [Overlays](#overlays)
-7. [Renderer](#renderer)
-8. [Frontend and the F1 inspector](#frontend-and-the-f1-inspector)
-9. [Submodule patches](#submodule-patches)
-10. [Testing and diagnostics](#testing-and-diagnostics)
+6. [Audio](#audio)
+7. [Overlays](#overlays)
+8. [Renderer](#renderer)
+9. [Frontend and the F1 inspector](#frontend-and-the-f1-inspector)
+10. [Submodule patches](#submodule-patches)
+11. [Testing and diagnostics](#testing-and-diagnostics)
 
 ## The pipeline
 
@@ -121,6 +122,30 @@ fixed in `src/libultra_glue.cpp`:
 
 General lesson: a libultra function the runtime owns by name loses every side effect the cartridge's
 body had; an unnamed routine that depended on it hangs far from the cause.
+
+## Audio
+
+`src/callbacks.cpp` (Wave Race's design): recompiled `aspMain` run from a private copy of the command
+list, non-`Broke` exits drop one frame, the port resamples and keeps the SDL queue ~30 ms deep by
+under-reporting `osAiGetLength`.
+
+**Symptom: "task failed with UnhandledJumpTarget: 59389 commands", then a crash in
+`func_8000091C_151C` (`funcs_13.c:2386`).** Seen first on a slow WSLg run; reproduced on Windows in
+seconds with `SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=1000` (a device that drains 512 frames a second).
+The game sizes each audio frame as `(s16)((nominal − osAiGetLength()/4 + 0xB0) & 0xFFF0)`, raised to a
+minimum by a signed compare (GAME-INTERNALS.md, Audio). When the host queue holds more than ~33,000
+frames, the s16 wraps positive, `alAudioFrame` writes tens of thousands of commands into its
+`0x8000`-byte buffer and the heap after it is overwritten. Hardware never reports more than one buffer.
+Fixed in the port, not the game:
+
+- `get_frames_remaining` never reports more than 4,096 frames (the subtraction then goes negative and
+  the game uses its minimum);
+- `queue_samples` drops buffers while the device already holds over a second (`[bh] audio device is not
+  draining: N buffers dropped`);
+- a failed task longer than 4,096 commands is not bisected (the prefix re-runs are quadratic).
+
+Same run after the fix: Greece gameplay at 20 frames/s, no failed task. A normal run
+(`BH_AUDIO_STATS=1`, 75 s) is unchanged: 35 of 36 windows with nothing zero-filled.
 
 ## Overlays
 
@@ -245,6 +270,16 @@ Rerun it after any submodule update.
   `tools/frame_motion.py`) use `tools/print_window.py` (PrintWindow with `PW_RENDERFULLCONTENT`), which
   reads the window's own contents even when covered. Crop to the window size: the bitmap is the
   DPI-virtualised client size.
+
+### Crashes
+
+Windows: `src/crash_handler.cpp` prints the fault, module, function and source line. Linux: the same file
+installs a SIGSEGV/SIGBUS/SIGFPE/SIGILL handler that prints the accessed address, the executable's load
+base and a raw backtrace; resolve frames with
+`llvm-symbolizer-21 --obj=build-linux/body-harvest-recomp 0x<offset>` (the `+0x…` in each line).
+
+On Linux the first SIGTERM did not end a gameplay run (a second one did): use `timeout -k 10 <s>` in
+scripts.
 
 ### Frame interpolation
 

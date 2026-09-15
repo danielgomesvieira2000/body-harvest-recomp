@@ -92,6 +92,13 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
 ## Audio
 
 - Output 32000 Hz, ~800 frames per buffer at 60 buffers/s (`BH_AUDIO_STATS=1`).
+- Audio thread `func_80000730_1330` (thread id 5), woken by the scheduler's retrace message; each
+  retrace `func_8000091C_151C` builds one task. Frame length:
+  `outLen = (s16)((D_800431A8 − (osAiGetLength() >> 2) + 0xB0) & 0xFFF0)`, raised to `D_800431A4` if
+  below it (signed). Command lists alternate between two `0x8000`-byte buffers (`D_8003FB20[0..1]`);
+  the task's `data_size` is the length `alAudioFrame` returned. Read from decomp `core/1050.c` (a
+  matching function). A large `osAiGetLength` wraps `outLen` positive and overruns the buffer —
+  PORTING.md, Audio.
 
 ## Input
 

@@ -683,6 +683,18 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     static std::vector<int16_t> converted;
     bh::resample::process(unswapped.data(), sample_count, converted);
 
+    // A device that has stopped draining: more than a second already waiting.
+    // Queuing more only grows latency and memory, so this buffer is dropped (the
+    // game still gets a bounded depth from get_frames_remaining).
+    if (SDL_GetQueuedAudioSize(g_audio_device) / kBytesPerFrame > g_device_frequency) {
+        static unsigned dropped_full = 0;
+        if (++dropped_full == 1 || dropped_full % 600 == 0) {
+            std::fprintf(stderr, "[bh] audio device is not draining: %u buffers dropped\n", dropped_full);
+            std::fflush(stderr);
+        }
+        return;
+    }
+
     // Measured before the buffer goes in, so it is the trough: what the device
     // had left to play at the moment the game got round to making more. See
     // include/bh/audiodiag.h. Both calls are no-ops unless a BH_AUDIO_*
@@ -736,7 +748,20 @@ size_t get_frames_remaining() {
     // queue settles that much deeper. See kQueueHeadroomMs: this one subtraction
     // is the whole mechanism, and it works only because the game sizes every
     // buffer from the answer to this call.
-    return frames > g_queue_headroom_frames ? frames - g_queue_headroom_frames : 0;
+    const size_t reported = frames > g_queue_headroom_frames ? frames - g_queue_headroom_frames : 0;
+
+    // Never more than the hardware could say. A real AI never holds more than the
+    // buffer it is playing, but a host device that stops draining (seen under
+    // WSLg on a CPU-starved run) lets this queue grow without limit, and the game
+    // cannot survive a big answer: func_8000091C computes the next frame's length
+    // as (nominal - reported + 0xB0) & 0xFFF0 in an s16, and past about 33,000
+    // frames that wraps to a large *positive* length. alAudioFrame then writes
+    // tens of thousands of commands into a 0x8000-byte buffer, the heap behind it
+    // is overwritten, and the audio thread faults a few frames later (measured:
+    // "task failed ... 59389 commands", then SIGSEGV in func_8000091C). At or below
+    // this cap the subtraction goes negative and the game uses its minimum length.
+    constexpr size_t kMaxReportedFrames = 4096;
+    return std::min(reported, kMaxReportedFrames);
 }
 
 void set_frequency(uint32_t frequency) {
@@ -1010,7 +1035,21 @@ RspExitReason asp_main_watched(uint8_t* rdram, uint32_t ucode_addr) {
         if (dropped <= 6) {
             std::fprintf(stderr, "[bh-audio] task failed with %s: %u commands at 0x%08X\n",
                          rsp_exit_name(reason), g_audio_task_size / 8, g_audio_task_data);
-            bisect_audio_task(rdram, ucode_addr);
+            // The bisection re-runs every prefix of the list, so its cost grows with
+            // the square of the list's length. A real audio list is a few hundred
+            // commands; one of tens of thousands is a task the game was rewriting
+            // while it was read (seen once on a CPU-starved WSL run: 50,368
+            // commands), and bisecting it stalled the task thread until the process
+            // was killed. Such a task is dropped like any other failure, unexamined.
+            constexpr uint32_t kMaxBisectCommands = 4096;
+            if (g_audio_task_size / 8 <= kMaxBisectCommands) {
+                bisect_audio_task(rdram, ucode_addr);
+            }
+            else {
+                std::fprintf(stderr, "[bh-audio] not bisected: more than %u commands is not a real audio list\n",
+                             kMaxBisectCommands);
+                std::fflush(stderr);
+            }
         }
         return RspExitReason::Broke;
     }

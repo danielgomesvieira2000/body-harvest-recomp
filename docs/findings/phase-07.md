@@ -92,8 +92,16 @@ unless the aspect-ratio setting is Original.
 **Result:** `cull angle 0x2EE0 -> 0x48F5 (aspect 2.333, margin 1.10)`; the same 21:9 frames show complete
 terrain to both edges.
 
+## Menus at 21:9 (after changes 1–3)
+
+`--grab 17,23,32,38,47,55` with `start-spam.txt` at `BH_WINDOW_SIZE=1680x720`: title, name entry (three
+frames), Play menu and the dropship cutscene. Every menu fills the window — backdrop stretched, the 3D
+ship behind the dimmed menus widened, buttons and letters at their own size in the middle. The dropship
+cutscene is widened with the game's own cinematic bands at the top and bottom.
+
 ## Not yet done
 
 - HUD anchoring (radar right, weapon/health/alien bars left): through the F1 panel with Daniel.
-- Menus other than the title (slot select, name entry, Play menu) at 16:9 and 21:9 — grabbed only in passing.
+- Whether the cutscene's top/bottom bands should stay (the game draws them; "no black bars" allows an
+  original letterbox only if Daniel says so).
 - Buildings (`inside` overlay) and vehicles' own culls at wide aspects.

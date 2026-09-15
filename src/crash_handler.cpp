@@ -461,10 +461,81 @@ void install_crash_handler() {
 // is work for the day that actually happens on Linux or macOS.
 
 #include <cstdio>
+#include <csignal>
+#include <cstring>
+#include <execinfo.h>
+#include <initializer_list>
+#include <link.h>
+#include <unistd.h>
+
+// A fault does print something here after all: the faulting address and a raw
+// backtrace, with the executable's load base so the frames can be resolved
+// afterwards (`llvm-symbolizer --obj=build-linux/body-harvest-recomp 0x<pc - base>`).
+// Added when a WSL run died with exit 139 and no debugger was installed. Only
+// async-signal-safe calls in the handler; backtrace() is primed at install so
+// its lazy libgcc load does not happen inside the signal.
+
+namespace {
+
+uintptr_t g_exe_base = 0;
+
+void write_str(const char* s) {
+    ssize_t ignored = write(STDERR_FILENO, s, std::strlen(s));
+    (void)ignored;
+}
+
+void write_hex(const char* label, uintptr_t value) {
+    char buf[64];
+    char* p = buf + sizeof(buf);
+    *--p = '\0';
+    *--p = '\n';
+    do {
+        *--p = "0123456789abcdef"[value & 0xF];
+        value >>= 4;
+    } while (value != 0);
+    *--p = 'x';
+    *--p = '0';
+    write_str(label);
+    write_str(p);
+}
+
+void on_fault(int sig, siginfo_t* info, void*) {
+    write_str(sig == SIGSEGV ? "\n[bh] SIGSEGV\n" : sig == SIGBUS ? "\n[bh] SIGBUS\n" : "\n[bh] SIGFPE/SIGILL\n");
+    write_hex("[bh] accessing ", reinterpret_cast<uintptr_t>(info->si_addr));
+    write_hex("[bh] executable base ", g_exe_base);
+    void* frames[48];
+    int count = backtrace(frames, 48);
+    backtrace_symbols_fd(frames, count, STDERR_FILENO);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+}  // namespace
 
 namespace bh {
 
-void install_crash_handler() {}
+void install_crash_handler() {
+    dl_iterate_phdr([](dl_phdr_info* info, size_t, void*) {
+        g_exe_base = info->dlpi_addr;
+        return 1;  // the first entry is the executable itself
+    }, nullptr);
+    void* prime[2];
+    backtrace(prime, 2);
+
+    static char alt_stack[64 * 1024];
+    stack_t ss{};
+    ss.ss_sp = alt_stack;
+    ss.ss_size = sizeof(alt_stack);
+    sigaltstack(&ss, nullptr);
+
+    struct sigaction sa{};
+    sa.sa_sigaction = on_fault;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    for (int sig : {SIGSEGV, SIGBUS, SIGFPE, SIGILL}) {
+        sigaction(sig, &sa, nullptr);
+    }
+}
 
 void watch_for_hang(const char*, int) {}
 void watch_done() {}
