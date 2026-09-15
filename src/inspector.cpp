@@ -484,6 +484,9 @@ namespace {
 // hud.json and the panel's dropdown both override an entry here.
 void load_defaults([[maybe_unused]] std::unordered_map<std::string, int>& by_identity) {
     // ---- promoted from hud.json by tools/promote_hud_tags.py ----
+    by_identity["tex:0x0025da40#38cb25f0"] = kLeft;
+    by_identity["tex:0x0100a370#eb4a9ebf"] = kLeft;
+    by_identity["tex:0x0100adf0#e46ed749"] = kLeft;
     // ---- end promoted ----
 }
 
