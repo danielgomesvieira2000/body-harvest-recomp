@@ -25,6 +25,15 @@
 
 namespace bh::hudrewrite {
 
+// Anchor markers. The game-side HUD wrappers (src/widescreen.cpp) write an RDP
+// G_NOOP (0xC0, which RT64 and a real RDP ignore) carrying kAnchorMagic | class
+// into the game's display list before a HUD widget and kAnchorMagic | 0 after it.
+// Everything between them -- rectangles, triangle runs, called lists -- is
+// anchored to that class by the rewriter, unless its identity has a class of its
+// own. The class values are bh::inspector::Class.
+constexpr uint32_t kNoopOp = 0xC0000000u;
+constexpr uint32_t kAnchorMagic = 0x42484D00u;   // "BHM" + class in the low byte
+
 // Returns the KSEG0 address of the rewritten list to submit instead, or 0 to
 // submit the game's own.
 uint32_t rewrite(uint8_t* rdram, uint32_t list_address);

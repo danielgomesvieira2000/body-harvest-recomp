@@ -131,6 +131,16 @@ bool reticle_interp_enabled() {
     return on;
 }
 
+// Whether the game-side HUD wrappers' regions are applied (BH_NO_HUD_ANCHORS=1: off;
+// the wrappers are not registered then either).
+bool anchors_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("BH_NO_HUD_ANCHORS");
+        return !(v != nullptr && *v != '\0' && *v != '0');
+    }();
+    return on;
+}
+
 int class_of(const std::string& identity) {
     return bh::inspector::class_for(identity.c_str());
 }
@@ -295,6 +305,33 @@ struct Writer {
         if (have_viewport) emit(viewport_w0, viewport_w1);
     }
 
+    // ---- anchor regions (markers from the game-side HUD wrappers) ----
+    int anchor = bh::inspector::kAuto;   // the open region's class
+    int anchors = 0;
+
+    static uint32_t origin_of(int cls) {
+        return cls == bh::inspector::kRight ? G_EX_ORIGIN_RIGHT : G_EX_ORIGIN_LEFT;
+    }
+    void anchor_begin(int cls) {
+        widen_scissor();
+        const uint32_t origin = origin_of(cls);
+        viewport_align(origin, origin_cancel(origin));
+        ++anchors;
+    }
+    void anchor_end() {
+        viewport_align(G_EX_ORIGIN_NONE, 0);
+        restore_scissor();
+    }
+    // A rectangle inside a region takes the region's edge.
+    void anchor_rect_begin() {
+        const uint32_t origin = origin_of(anchor);
+        const int off = origin == G_EX_ORIGIN_RIGHT ? origin_cancel(G_EX_ORIGIN_RIGHT) : 0;
+        if (GfxCommand* cmd = reserve(2)) gEXSetRectAlign(cmd, origin, origin, off, 0, off, 0);
+    }
+    void anchor_rect_end() {
+        if (GfxCommand* cmd = reserve(2)) gEXSetRectAlign(cmd, G_EX_ORIGIN_NONE, G_EX_ORIGIN_NONE, 0, 0, 0, 0);
+    }
+
     // ---- rectangles ----
     void rect_begin(int cls) {
         switch (cls) {
@@ -416,6 +453,10 @@ struct Writer {
                     emit(w0, w1);
                     break;
                 case kEndDl:
+                    if (depth == 0 && anchor != bh::inspector::kAuto) {
+                        anchor_end();   // a region the game never closed
+                        anchor = bh::inspector::kAuto;
+                    }
                     if (branch_cls != bh::inspector::kAuto) group_end(branch_cls);
                     emit(w0, w1);
                     return 0x80000000u | (base + start);
@@ -468,6 +509,11 @@ struct Writer {
                     emit(w0, callee);
                     enable();
                     group_end(cls);
+                    if (cls != bh::inspector::kAuto && anchor != bh::inspector::kAuto) {
+                        // The call's own class ended its alignment; the region's resumes.
+                        widen_scissor();
+                        viewport_align(origin_of(anchor), origin_cancel(origin_of(anchor)));
+                    }
                     if (player) {
                         model_group(G_EX_ID_AUTO);
                         model = 0;
@@ -506,6 +552,20 @@ struct Writer {
                     scissor_w0 = w0;
                     scissor_w1 = w1;
                     emit(w0, w1);
+                    if (anchor != bh::inspector::kAuto) widen_scissor();
+                    break;
+                case kRdpNoop:
+                    if ((w1 & 0xFFFFFF00u) == kAnchorMagic) {
+                        const int cls = static_cast<int>(w1 & 0xFF);
+                        if (cls != anchor) {
+                            if (anchor != bh::inspector::kAuto) anchor_end();
+                            anchor = (cls == bh::inspector::kLeft || cls == bh::inspector::kRight) ? cls : bh::inspector::kAuto;
+                            if (anchor != bh::inspector::kAuto && anchors_enabled()) anchor_begin(anchor);
+                            else anchor = bh::inspector::kAuto;
+                        }
+                        break;   // the marker itself is not passed on
+                    }
+                    emit(w0, w1);
                     break;
                 case kSetCImg:
                     fb_width = (w0 & 0xFFF) + 1;
@@ -528,9 +588,16 @@ struct Writer {
                         int((((w0 >> 12) & 0xFFF) / 4.0f) * to_320), int(((w0 & 0xFFF) / 4.0f) * to_320));
                     const int cls = id.empty() ? bh::inspector::kAuto : class_of(id);
                     if (!id.empty()) trace_seen(id, "fill rect", cls);
+                    if (cls == bh::inspector::kAuto && anchor != bh::inspector::kAuto) {
+                        anchor_rect_begin();
+                        emit(w0, w1);
+                        anchor_rect_end();
+                        break;
+                    }
                     rect_begin(cls);
                     emit(w0, w1);
                     rect_end(cls);
+                    if (anchor != bh::inspector::kAuto) widen_scissor();
                     if (cls != bh::inspector::kAuto) ++applied;
                     break;
                 }
@@ -538,14 +605,21 @@ struct Writer {
                 case kTexRectFlip: {
                     const int cls = class_of(texture_ident);
                     trace_seen(texture_ident, "tex rect", cls);
-                    rect_begin(cls);
+                    const bool by_region = cls == bh::inspector::kAuto && anchor != bh::inspector::kAuto;
+                    if (by_region) anchor_rect_begin();
+                    else rect_begin(cls);
                     emit(w0, w1);
                     // RT64's HLE texrect consumes the next two commands whatever they are.
                     for (int i = 0; i < 2; ++i) {
                         emit(read_word(rdram, pc), read_word(rdram, pc + 4));
                         pc += 8;
                     }
+                    if (by_region) {
+                        anchor_rect_end();
+                        break;
+                    }
                     rect_end(cls);
+                    if (anchor != bh::inspector::kAuto) widen_scissor();
                     if (cls != bh::inspector::kAuto) ++applied;
                     break;
                 }
@@ -569,7 +643,7 @@ uint32_t rewrite(uint8_t* rdram, uint32_t list_address) {
         const char* v = std::getenv("BH_NO_HUD_REWRITE");
         return v != nullptr && *v != '\0' && *v != '0';
     }();
-    if (off || (!bh::inspector::any_classes() && !model_ids_enabled())) return 0;
+    if (off || (!bh::inspector::any_classes() && !model_ids_enabled() && !anchors_enabled())) return 0;
 
     write_identity(rdram);
     g_turn ^= 1;
@@ -610,6 +684,13 @@ uint32_t rewrite(uint8_t* rdram, uint32_t list_address) {
             std::fflush(stderr);
             lists = found = 0;
         }
+    }
+    static bool reported_anchors = false;
+    if (w.anchors > 0 && !reported_anchors) {
+        reported_anchors = true;
+        std::fprintf(stderr, "[bh] HUD widgets anchored to the edges: %d region(s) in this frame (BH_NO_HUD_ANCHORS=1: off)\n",
+                     w.anchors);
+        std::fflush(stderr);
     }
     static bool reported_reticle = false;
     if (w.reticles > 0 && !reported_reticle) {

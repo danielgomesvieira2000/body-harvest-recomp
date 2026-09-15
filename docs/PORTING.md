@@ -238,7 +238,16 @@ this game's lists are F3DEX 1.x, so the feed and rewriter were rewritten against
 
 `src/dlcensus.cpp` publishes each frame's 2D elements (identities per `include/bh/hudid.h`);
 `src/hudrewrite.cpp` applies classes live; `hud.json` in the settings folder; promote with
-`tools/promote_hud_tags.py`.
+`tools/promote_hud_tags.py`. Built-in tags: weapon icon, ammo box and digits `left`.
+
+**Symptom: the radar and the health/alien bars stay in the 4:3 middle, and the panel cannot move them.**
+- They are top-level 2D triangles, which a class per identity did not reach.
+- The bar frames share textures with the vehicle's bars on the right.
+
+The game's own draw functions are wrapped instead (`src/widescreen.cpp`: bars by their side argument,
+radar right, weapon panel left). Each writes a `G_NOOP` anchor marker (`include/bh/hudrewrite.h`) before
+and after its drawing. The rewriter aligns the viewport and rects to that edge for everything between
+the markers, and a tagged identity still wins. `BH_NO_HUD_ANCHORS=1`: off.
 
 ## Submodule patches
 
@@ -287,6 +296,7 @@ Rerun it after any submodule update.
 | `BH_NO_MODEL_IDS=1` | the player model's parts are left to RT64's own pairing |
 | `BH_NO_SHADOW_INTERP=1` / `BH_SHADOW_TRACE=1` | the player's shadow steps at the game's rate / how often it is found |
 | `BH_NO_RETICLE_INTERP=1` | the aiming reticle steps at the game's rate |
+| `BH_NO_HUD_ANCHORS=1` | radar, bars and weapon panel stay in the 4:3 middle |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs

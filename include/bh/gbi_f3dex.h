@@ -39,6 +39,7 @@ constexpr uint8_t kCullDl = 0xBE;
 constexpr uint8_t kTri1 = 0xBF;            // indices (x2) at bits 17/9/1 of w1
 
 // RDP
+constexpr uint8_t kRdpNoop = 0xC0;         // G_NOOP
 constexpr uint8_t kTexRect = 0xE4;         // HLE consumes the next two commands (s,t then dsdx,dtdy)
 constexpr uint8_t kTexRectFlip = 0xE5;
 constexpr uint8_t kSetScissor = 0xED;

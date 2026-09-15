@@ -105,6 +105,13 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   ± rotated half-extents, centre last, heights from the terrain), built in world coordinates in the
   frame's vertex buffer, drawn with `gSPVertex(5)` and two `gSP2Triangles` under the shared world
   matrix. Texture `0x05000000` when on foot.
+- **HUD widgets** (outside overlay), all drawn at fixed 320×240 coordinates under `guOrtho(0..width)`:
+  - `func_8009D96C_AC91C` draws the bars through `func_8009C6CC_AB67C(x, y, fraction, side, icon, …)`:
+    health and alien at x 0x50 with side 0, the vehicle's at width − 0x20 with side 1. The frames are
+    rectangles from `0x01011C80`…`0x01013380`, the fills and icons triangles.
+  - `func_800A03FC_AF3AC` (DisplayScanner) draws the radar as triangles at x 242–309, y 10–78.
+  - `func_8013A764_149714` draws the weapon icon (a RAM texture at `0x0025DA40`) and the ammo box and
+    digits (`0x0100ADF0`, `0x0100A370`).
 - **Aiming reticle:** `func_800A2D98_B1D48` stores the aim point in `D_8014F618` (+0..+8), the billboard
   axes scaled by camera distance, and emits it through `func_800A2260_B1210`. It is texture
   `0x01009A70` (I4) and a nine-vertex world-space billboard (centre is vertex 4) under the world matrix

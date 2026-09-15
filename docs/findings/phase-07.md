@@ -136,9 +136,50 @@ sky: still 4:3 below the top band. His live session's census showed why:
 
 **Fix:** every full-width row in the frame is stretched. Confirmed by Daniel aiming at the sky, 16:9.
 
+## HUD anchoring
+
+**First, the panel:** Daniel tagged the weapon icon, ammo box and ammo digits `left` and saved
+`hud.json`. They were promoted into `load_defaults()` (`tools/promote_hud_tags.py`, commit `708b7a1`).
+
+**Reported next:** "I cannot find the other HUD elements to anchor: the map/radar should be anchored to
+the right, the health and other bar should be anchored left."
+
+**Survey** (every 2D rectangle and element of a gameplay frame, one entry each):
+
+| Element | Drawn as | Identity |
+|---|---|---|
+| Radar | triangles directly in the top-level list, x 242–309, y 10–78 | `tex:0x0502e110`, `0x0014ede0`, `0x0503c8b0` |
+| Health / alien bar frames | rectangles at x 25–92, y 182–196 and 202–216, **and the same textures at x 982–997** | `tex:0x01011c80` … `0x01013380` |
+| Bar fills | top-level triangles, merged extent x −38…88 | `tex:0x8013d540` |
+| Heart / face icons | top-level triangles, x 21–39 | `tex:0x8025f540`, `0x8025f780` |
+
+Two reasons the panel could not do it:
+- The rewriter applied classes to rectangles and called lists only, never to top-level triangle runs.
+- One texture class cannot separate the left bars from the vehicle's bars on the right:
+  `func_8009C6CC_AB67C(x, y, fraction, side, icon, …)` draws both, side 0 at x 0x50 and side 1 at
+  width − 0x20 (decomp AAA70.c `func_8009D96C`).
+
+**Fix, game side** (`src/widescreen.cpp`): three draw functions are wrapped, re-registered on each
+outside-overlay load. Each writes an RDP `G_NOOP` marker (`0xC0000000, 0x42484D00 | class`) into the
+game's display list before the call and an end marker after it:
+- `func_8009C6CC_AB67C` (bars): left or right from its `side` argument;
+- `func_800A03FC_AF3AC` (DisplayScanner, the radar): right;
+- `func_8013A764_149714` (weapon and ammo): left.
+
+**Fix, rewriter** (`src/hudrewrite.cpp`), for everything between a start and end marker:
+- the viewport is aligned to that edge (triangles and called lists) and the scissor widened;
+- each rectangle gets the edge's rect origin;
+- an identity with a class of its own (panel, `hud.json`, built-in) still takes that class, and the
+  region's alignment resumes after it;
+- markers are not passed on.
+
+`BH_NO_HUD_ANCHORS=1` removes both halves.
+
+**Verified:** log `HUD widgets anchored to the edges`; Daniel watching the 16:9 test run: "That worked".
+
 ## Not yet done
 
-- HUD anchoring (radar right, weapon/health/alien bars left): through the F1 panel with Daniel.
+- HUD anchoring beyond the radar, bars and weapon panel (e.g. dialogue boxes, scanner text): none requested yet.
 - Whether the cutscene's top/bottom bands should stay (the game draws them; "no black bars" allows an
   original letterbox only if Daniel says so).
 - Buildings (`inside` overlay) and vehicles' own culls at wide aspects.

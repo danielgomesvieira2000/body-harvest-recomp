@@ -17,6 +17,8 @@
 #include "ultramodern/config.hpp"
 
 #include "bh/callbacks.h"
+#include "bh/hudrewrite.h"
+#include "bh/inspector.h"
 
 extern "C" void setFullResolution(uint8_t* rdram, recomp_context* ctx);
 
@@ -133,6 +135,65 @@ void cull_angle_widened(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// ---- HUD widgets anchored to the edges ------------------------------------------
+//
+// Symptom: at 16:9 and wider the radar, the health and alien bars and the weapon
+// panel stay in the middle 4:3 of the picture. The F1 panel could not move them:
+// the radar, the bar fills and the bar icons are 2D triangles drawn straight into
+// the main list, which the rewriter classified only as rectangles or called
+// lists; and the bar frames share their textures between the left-hand bars and
+// the vehicle's bars on the right, so a class per texture would drag one or the
+// other to the wrong edge (docs/findings/phase-07.md, "HUD anchoring").
+//
+// The game says which side it means. func_8009C6CC_AB67C(x, y, fraction, side,
+// icon, ...) draws every bar with its icon: the health and alien bars with side 0
+// at x 0x50, the vehicle's with side 1 at width - 0x20 (decomp AAA70.c
+// func_8009D96C). func_800A03FC_AF3AC is DisplayScanner, the radar;
+// func_8013A764_149714 draws the weapon icon and ammo count. Each is wrapped:
+// an anchor marker (include/bh/hudrewrite.h) goes into the game's display list
+// before the call and an end marker after it, and the rewriter anchors
+// everything in between. A class set in the panel or hud.json still wins.
+// BH_NO_HUD_ANCHORS=1: off.
+//
+// All three live in the outside overlay, so they are registered again every time
+// it loads, like the cull angle.
+extern "C" void func_8009C6CC_AB67C(uint8_t* rdram, recomp_context* ctx);
+extern "C" void func_800A03FC_AF3AC(uint8_t* rdram, recomp_context* ctx);
+extern "C" void func_8013A764_149714(uint8_t* rdram, recomp_context* ctx);
+constexpr uint32_t kHudBarFunc = 0x8009C6CC;
+constexpr uint32_t kScannerFunc = 0x800A03FC;
+constexpr uint32_t kAmmoFunc = 0x8013A764;
+constexpr gpr kDisplayListCursor = static_cast<gpr>(static_cast<int32_t>(0x8005BB2C));   // D_8005BB2C
+
+void emit_anchor_marker(uint8_t* rdram, int cls) {
+    const uint32_t cursor = static_cast<uint32_t>(MEM_W(0, kDisplayListCursor));
+    if ((cursor >> 24) != 0x80) return;
+    const gpr at = static_cast<gpr>(static_cast<int32_t>(cursor));
+    MEM_W(0, at) = static_cast<int32_t>(bh::hudrewrite::kNoopOp);
+    MEM_W(4, at) = static_cast<int32_t>(bh::hudrewrite::kAnchorMagic | static_cast<uint32_t>(cls));
+    MEM_W(0, kDisplayListCursor) = static_cast<int32_t>(cursor + 8);
+}
+
+void hud_bar_anchored(uint8_t* rdram, recomp_context* ctx) {
+    // a3: 0 = a left-hand bar, 1 = a right-hand one.
+    const int cls = (ctx->r7 & 0xFF) != 0 ? bh::inspector::kRight : bh::inspector::kLeft;
+    emit_anchor_marker(rdram, cls);
+    func_8009C6CC_AB67C(rdram, ctx);
+    emit_anchor_marker(rdram, bh::inspector::kAuto);
+}
+
+void scanner_anchored(uint8_t* rdram, recomp_context* ctx) {
+    emit_anchor_marker(rdram, bh::inspector::kRight);
+    func_800A03FC_AF3AC(rdram, ctx);
+    emit_anchor_marker(rdram, bh::inspector::kAuto);
+}
+
+void ammo_anchored(uint8_t* rdram, recomp_context* ctx) {
+    emit_anchor_marker(rdram, bh::inspector::kLeft);
+    func_8013A764_149714(rdram, ctx);
+    emit_anchor_marker(rdram, bh::inspector::kAuto);
+}
+
 }  // namespace
 
 namespace bh {
@@ -141,6 +202,11 @@ void overlay_loaded(size_t overlay_id) {
     // recomp/overlays.txt order: 1 = .overlay_gameplay_outside.
     if (overlay_id == 1 && !env_off_flag("BH_NO_WIDE_CULL")) {
         recomp::overlays::add_loaded_function(static_cast<int32_t>(kCullAngleFunc), cull_angle_widened);
+    }
+    if (overlay_id == 1 && !env_off_flag("BH_NO_HUD_ANCHORS")) {
+        recomp::overlays::add_loaded_function(static_cast<int32_t>(kHudBarFunc), hud_bar_anchored);
+        recomp::overlays::add_loaded_function(static_cast<int32_t>(kScannerFunc), scanner_anchored);
+        recomp::overlays::add_loaded_function(static_cast<int32_t>(kAmmoFunc), ammo_anchored);
     }
 }
 
