@@ -20,6 +20,7 @@ SCRIPTS = [
     "patch_n64recomp.py",          # N64Recomp: use_lookup_for_all_function_calls config key
     "patch_librecomp.py",          # librecomp: report the caller on a failed function lookup
     "patch_runtime_shutdown.py",   # librecomp/ultramodern: join workers before freeing RDRAM
+    "patch_runtime_timer.py",      # ultramodern: timer waits rounded up, not truncated (Windows)
     "patch_recompinput.py",        # recompinput: auto-assign controllers to players
     "patch_rt64_eventfilter.py",   # RT64: take the SDL event filter back off
     "patch_rt64_inspector.py",     # RT64: port hook in the F1 developer UI; F2 unbound

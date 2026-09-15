@@ -146,9 +146,9 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   - past 10,001 passes the output fades with `(pass count)^-3`;
   - with the pak lost, it re-checks every 2,500 passes.
 
-  The rumble thread `func_80000ED4_1AD4` (pri 15) turns the queue into `osMotorStart/Stop/Init`. In the
-  port the loop makes ~25,000 passes a second (`BH_RUMBLE_TRACE=1`), so pass-counted timings run fast
-  (phase-05.md).
+  The rumble thread `func_80000ED4_1AD4` (pri 15) turns the queue into `osMotorStart/Stop/Init`. Before the timer
+  fix the loop made ~25,000 passes a second (`BH_RUMBLE_TRACE=1`), so pass-counted timings ran fast
+  (phase-05.md). Now ~285 passes a second (3 ms per read, the ares estimate; hardware not measured).
 
 ## Saves
 

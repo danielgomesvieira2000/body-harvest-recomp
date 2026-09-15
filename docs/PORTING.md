@@ -127,7 +127,9 @@ fixed in `src/libultra_glue.cpp`:
    `osContStartReadData` → `osRecvMesg(SI)` → process. The runtime completes SI transfers on the spot, so
    the receive never blocks and ultramodern's cooperative scheduler never runs the priority-4 game
    thread. Wrapper at `0x8001D6E0`: after starting the read, block the thread on a timer for
-   `BH_SI_LATENCY_MS` (default 1; 0 = off).
+   `BH_SI_LATENCY_MS` (default 3 ms, ares' PIF read estimate; 0 = off). Until `patch_runtime_timer.py`,
+   Windows truncated the 1 ms wait to nothing and the loop ran ~29,000 passes a second, which made the
+   game's pass-counted rumble 25 times too short (findings/phase-05.md, "The controller loop").
 
 General lesson: a libultra function the runtime owns by name loses every side effect the cartridge's
 body had; an unnamed routine that depended on it hangs far from the cause.
@@ -266,6 +268,7 @@ Rerun it after any submodule update.
 | `patch_rt64_texturepacks.py` | RT64 | texture packs from mods |
 | `patch_rt64_pairing.py` | RT64 | interpolation pairing counters |
 | `patch_rt64_l3dex.py` | RT64 | L3DEX 1.x gets F3DEX's command set |
+| `patch_runtime_timer.py` | N64ModernRuntime (ultramodern) | timer waits rounded up to whole ms; on Windows they were truncated, so timers fired early or at once |
 
 ## Testing and diagnostics
 
@@ -281,7 +284,7 @@ Rerun it after any submodule update.
 | `BH_PAIRING=1` | RT64 transform-pairing counters every 2 s |
 | `BH_SAMPLE=1` | thread sampler every 2 s (`tools/symbolize_log.py` resolves it) |
 | `BH_AUDIO_STATS=1` / `BH_AUDIO_DUMP` / `BH_AUDIO_HEADROOM_MS` / `BH_AUDIO_PERIOD` / `BH_AUDIO_NO_RESAMPLE` | audio diagnostics and knobs |
-| `BH_SI_LATENCY_MS=<n>` | controller transfer latency (default 1; 0 = immediate, which stalls boot) |
+| `BH_SI_LATENCY_MS=<n>` / `BH_SI_TRACE=1` | controller transfer latency (default 3, ares-derived; 0 = immediate, which stalls boot) / reads a second and real block time |
 | `BH_NO_RUMBLE_PAK=1` | report an empty accessory slot |
 | `BH_RUMBLE_RAW=1` / `BH_RUMBLE_TRACE=1` | rumble through recompinput's on/off model (felt as nothing) / log motor calls, duty and strength each second |
 | `BH_PRESENT_MODE=console\|skip\|early` | RT64 presentation mode |

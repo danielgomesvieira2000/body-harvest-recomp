@@ -79,7 +79,7 @@ random instant of it, so rumble barely got through.
 
 **Result:** Daniel: "rumble is working correctly now".
 
-**Open, measured with `BH_RUMBLE_TRACE`:** the controller loop makes 23,000–28,900 motor calls a
+**Open, measured with `BH_RUMBLE_TRACE`** (resolved in "The controller loop" below): the controller loop makes 23,000–28,900 motor calls a
 second, one per pass, so it runs ~25 kHz. The 1 ms SI latency glue (phase 04) should hold it near 1 kHz,
 so it does not throttle this loop as intended.
 
@@ -89,6 +89,43 @@ Consequences:
 - One message and thread switch per pass costs CPU.
 
 The hardware loop rate is not known here. Not changed yet.
+
+## The controller loop
+
+**Found by the rumble trace:** the controller loop made 23,000–28,900 passes a second. The glue meant
+to pace it at 1 ms per `osContStartReadData` (phase 04) evidently was not.
+
+**Measured** with `BH_SI_TRACE=1` (reads per second, and the time each block really lasted):
+
+| Test | Reads/s | Block, mean | Conclusion |
+|---|---|---|---|
+| 1 ms (the old default) | ~29,000 | 13 µs | the timer message arrives almost at once |
+| 1 ms, pacing queue drained before each arm | ~29,000 | 13 µs, **0** messages drained | not a stale message: refuted |
+| 5 ms | ~220 | 4,300 µs | paced, but a millisecond short |
+
+**Cause (runtime, Windows):** the timer thread waits with moodycamel's `wait_dequeue_timed`. On Windows
+that is `WaitForSingleObject(sema, (unsigned long)(usecs / 1000))`, truncating the wait to whole
+milliseconds. A 1 ms timer is a sub-millisecond wait by the time it is computed, so it fires at once;
+any other timer fires up to 1 ms early. Linux waits in nanoseconds, so the platforms differed.
+
+**What the rate should be:**
+- The game counts rumble in passes (`func_80001144(intensity, hold, decay)`: hold 5–20 passes, then
+  3–20 per pass, so 40–220 passes a rumble; pak re-check every 2,500).
+- ares estimates a controller read at `13,600 + 22,000` for a connected pad and `18,000` per empty
+  port, `× 3` cycles at 93.75 MHz: ~2.9 ms with four ports polled, plus ~0.13 ms for the SI write.
+  That is ~330 passes a second, 0.12–0.66 s per rumble.
+- Sources: ares `n64/si/io.cpp` and `n64/pif/hle.cpp` (`estimateTiming`).
+
+**Fix:**
+1. `tools/patch_runtime_timer.py` (in `patch_all.py`) rounds the timer thread's wait up to a whole
+   millisecond: a timer now fires at most 1 ms late, never early or at once. This affects every game
+   timer, including the EEPROM block waits, which now last their full 15 ms.
+2. `BH_SI_LATENCY_MS` default 3.
+
+**Result:** 284–290 reads a second, 3.3 ms per block (3 ms rounded up), gameplay 20 fps, rumble peaks
+0.73. Daniel, playing: "the rumble worked better now" (at 5 ms), then "This feels correct" (at 3 ms).
+
+**Found during the test, separate:** entering a building crashes (next section).
 
 ## The map crash
 

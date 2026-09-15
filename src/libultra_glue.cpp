@@ -9,6 +9,8 @@
 // Registered at cartridge addresses from on_init, after the runtime function
 // table (bh::install_libultra_glue, called from src/overlays.cpp).
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -79,10 +81,16 @@ void os_cont_init_glue(uint8_t* rdram, recomp_context* ctx) {
 // "threads and cooperative scheduling").
 //
 // Fix: after the runtime starts the read, block the calling thread on a timer for
-// the transfer's duration, as the SI interrupt's latency would. Emulators raise
-// that interrupt ~0x900 count ticks (well under a millisecond) after the transfer
-// starts; the host timer's floor is about 1 ms, so that is the default.
+// the transfer's duration, as the SI interrupt's latency would. The default is
+// 3 ms: ares estimates a PIF controller read at 13,600 cycles plus 22,000 per
+// connected pad and 18,000 per empty port (four polled here), times three, at
+// 93.75 MHz -- ~2.9 ms -- plus ~0.13 ms for the write (docs/findings/phase-05.md,
+// "The controller loop"). The game counts its rumble timings in these passes, so
+// the rate is not cosmetic: at the earlier 1 ms, which Windows' timer
+// truncation turned into no wait at all, the loop ran ~29,000 passes a second and
+// rumble 25 times too fast (tools/patch_runtime_timer.py).
 // BH_SI_LATENCY_MS=<n> changes it (0 restores the immediate completion).
+// BH_SI_TRACE=1 logs reads a second and the time each actually blocked.
 //
 // The timer and its queue live in scratch RDRAM above the game's 4 MB (inferred
 // free, docs/findings/phase-00.md), below the audio command-list copy at
@@ -96,11 +104,11 @@ uint32_t si_latency_ms() {
     static const uint32_t ms = []() -> uint32_t {
         const char* v = std::getenv("BH_SI_LATENCY_MS");
         if (v == nullptr || *v == '\0') {
-            return 1;
+            return 3;
         }
         const long parsed = std::strtol(v, nullptr, 10);
         const uint32_t clamped = static_cast<uint32_t>(parsed < 0 ? 0 : (parsed > 100 ? 100 : parsed));
-        std::fprintf(stderr, "[bh] BH_SI_LATENCY_MS: controller reads take %u ms (default 1)\n", clamped);
+        std::fprintf(stderr, "[bh] BH_SI_LATENCY_MS: controller reads take %u ms (default 3)\n", clamped);
         return clamped;
     }();
     return ms;
@@ -119,10 +127,32 @@ void os_cont_start_read_data_glue(uint8_t* rdram, recomp_context* ctx) {
         osCreateMesgQueue(rdram, static_cast<int32_t>(kSiPaceQueue), static_cast<int32_t>(kSiPaceMsg), 1);
     }
     constexpr uint64_t kTicksPerMs = 46875;   // ultramodern's counter rate (timer.cpp)
+    const auto blocked_from = std::chrono::steady_clock::now();
     osSetTimer(rdram, static_cast<int32_t>(kSiPaceTimer), ms * kTicksPerMs, 0,
                static_cast<int32_t>(kSiPaceQueue), 0);
     osRecvMesg(rdram, static_cast<int32_t>(kSiPaceQueue), NULLPTR, OS_MESG_BLOCK);
     ctx->r2 = result;
+
+    // BH_SI_TRACE=1: reads a second and the time each one actually blocked.
+    static const bool trace = std::getenv("BH_SI_TRACE") != nullptr;
+    if (trace) {
+        using clock = std::chrono::steady_clock;
+        static clock::time_point window = clock::now();
+        static uint32_t reads = 0;
+        static double blocked_us = 0, blocked_max_us = 0;
+        const double us = std::chrono::duration<double, std::micro>(clock::now() - blocked_from).count();
+        ++reads;
+        blocked_us += us;
+        blocked_max_us = std::max(blocked_max_us, us);
+        if (clock::now() - window >= std::chrono::seconds(1)) {
+            std::fprintf(stderr, "[bh-si] %u controller reads/s, blocked %.0f us mean, %.0f us max (latency %u ms)\n",
+                         reads, blocked_us / reads, blocked_max_us, ms);
+            std::fflush(stderr);
+            window = clock::now();
+            reads = 0;
+            blocked_us = blocked_max_us = 0;
+        }
+    }
 }
 
 }  // namespace
