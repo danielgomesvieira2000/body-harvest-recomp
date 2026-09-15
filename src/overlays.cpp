@@ -109,6 +109,9 @@ void announce_load(uint32_t dest, uint32_t rom, uint32_t size) {
         }
         load_overlay_by_id(static_cast<uint32_t>(id), section.ram_addr);
         g_loaded_at[id] = section.ram_addr;
+        // Wrappers on functions inside this overlay (src/widescreen.cpp) replace
+        // the entries the load just wrote.
+        bh::overlay_loaded(id);
 
         static const bool trace = env_set("BH_DEBUG_LOADS");
         if (trace) {

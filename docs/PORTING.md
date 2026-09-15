@@ -152,6 +152,16 @@ into 304×230 and relies on the VI's X/Y scale to stretch it; ultramodern ignore
 and RT64 presents without VI scale. `src/widescreen.cpp` replaces `setGameplayResolution` (`0x80006D84`)
 with the game's own `setFullResolution`, so gameplay draws 320×240 (`BH_FULL_FRAME=0`: off).
 
+**Symptom: title and menu backdrops pillarboxed at 16:9.** They are grids of 32×32 texture rectangles;
+`src/dlcensus.cpp` detects a full row of them per frame and gives the tiles `stretch` through the
+inspector's per-frame class layer (`BH_NO_BG_STRETCH=1`: off).
+
+**Symptom: terrain missing at the sides of a wide picture.** The game culls terrain tiles and entities
+against `D_8014FD2A` (full horizontal cull angle, BAM). `src/widescreen.cpp` wraps its setter
+`func_800B33BC_C236C` and stores the angle widened to the window aspect ×1.1. The setter is in the outside
+overlay: wrappers for overlay functions are re-registered from `bh::overlay_loaded` after every load of
+that overlay, because the load overwrites the function-map entries.
+
 ## Frontend and the F1 inspector
 
 RecompFrontend as Wave Race 64 / Hybrid Heaven: launcher (Load ROM → Start Game, Controls, Settings,
@@ -219,6 +229,8 @@ Rerun it after any submodule update.
 | `BH_TEST_INSPECTOR=<s>` / `BH_TEST_OPEN_SETTINGS=<tab>@<s>` / `BH_TEST_HUD_OVERRIDE` | test hooks |
 | `BH_WINDOW_SIZE=WxH` / `BH_YIELD_MS` / `BH_SKIP_DL` | window size, spin-yield wait, skip display lists |
 | `BH_FULL_FRAME=0` | gameplay keeps the game's 304×230 region (VI-scaled on hardware) |
+| `BH_NO_BG_STRETCH=1` | full-screen 32-px tile backdrops stay 4:3 |
+| `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
 
 ### Test runs
 

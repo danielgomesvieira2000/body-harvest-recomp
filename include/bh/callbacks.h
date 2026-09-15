@@ -52,6 +52,9 @@ void install_libultra_glue();
 // src/widescreen.cpp: game-side picture changes (full frame, widescreen view).
 // Called by register_runtime_functions.
 void install_widescreen();
+// Re-registers game-side wrappers that live in an overlay, after it loads
+// (recomp/overlays.txt order). Called by src/overlays.cpp.
+void overlay_loaded(size_t overlay_id);
 
 // src/calltrace.cpp: BH_TRACE_FUNCS=addr,... wraps those game addresses and prints
 // each call's arguments and result. Call from on_init after every registration.

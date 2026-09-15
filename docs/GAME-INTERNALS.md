@@ -75,6 +75,13 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   0..304×0..230.
 - **Projections in gameplay:** main 3D `persp aspect 1.3333 fovy 45 near 10 far 10015.5`; a second
   `fovy 45 near 15 far 1280.2`; HUD under ortho projections plus ~30 texture rectangles.
+- **Culling:** `D_8014FD2A` = full horizontal cull angle (BAM, `0x8000` = off), set by
+  `func_800B33BC_C236C(pitch)` from a 33° half-angle (`D_80142E20`); read by the terrain tile test
+  `func_800B960C_C85BC` (camera-relative box, then angle) and entity tests `func_800B93AC_C835C`
+  (angle + 4000 units), `func_800B9228_C81D8` (angle + 4500 units). `D_80157590 != 0` bypasses them
+  (third-party port). Observed values: `0x2EE0`, `0x30C0`, `0x694C` with pitch.
+- **Frontend backdrops:** grids of 32×32 texture rectangles covering 320 px (title rows at y 176/208,
+  intro at 192/224).
 - **Display-list buffers:** two, alternated per frame (`D_801CE710 - D_80031B84 * 0x22B00`); top-level
   list at `+0x280` (`0x801CE990`).
 
