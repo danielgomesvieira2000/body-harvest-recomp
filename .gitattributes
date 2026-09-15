@@ -1,0 +1,20 @@
+# LF everywhere, except the Windows script types that want CRLF.
+* text=auto eol=lf
+*.sh    text eol=lf
+*.py    text eol=lf
+*.toml  text eol=lf
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.svg   text
+
+# Binary: no EOL munging, no textual diff. (ROM and ELF types are listed so a
+# mistake is at least not mangled; .gitignore is what keeps them out.)
+*.png   binary
+*.ico   binary
+*.ttf   binary
+*.otf   binary
+*.z64   binary
+*.n64   binary
+*.v64   binary
+*.elf   binary
+*.bin   binary

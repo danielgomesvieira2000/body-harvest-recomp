@@ -1,0 +1,93 @@
+# ============================================================
+#  NO GAME DATA IN THIS REPOSITORY. EVER.
+#  Body Harvest is DMA Design / Gremlin Interactive (now Rockstar North / Atari)'s. This project ships tooling and
+#  original code only; the user supplies their own ROM.
+# ============================================================
+*.z64
+*.n64
+*.v64
+*.rom
+baserom*
+*.elf
+*.o
+*.obj
+*.a
+*.bin
+*.sym
+*.map
+*.d
+
+# Recompiler output (regenerated from the user's ROM)
+/RecompiledFuncs/
+/RecompiledPatches/
+/RecompiledRsp/
+dump.toml
+data_dump.toml
+/recomp/*.full.toml
+/recomp/jal_targets.txt
+
+# splat / disassembly output (derived from the user's ROM)
+/asm/
+/bin/
+/expected/
+/context/
+/syms/*.toml
+
+# Recompiler executables copied to the repo root
+/N64Recomp
+/N64Recomp.exe
+/RSPRecomp
+/RSPRecomp.exe
+
+# Build. Any build*/ directory (build, build-fe, build-linux, build-macos ...).
+/build*/
+/out/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+*.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+
+# Tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors / OS
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.cache/
+*.user
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Read-only upstream checkouts used as reference (never built, never shipped)
+/reference/
+
+# Release staging (tools/package_release.*)
+/dist/
+
+# Window captures (tools/capture_window.ps1, tools/capture_frames.py)
+/shots/
+
+# Runtime output when the game is started from the repository root. Anchored,
+# so that examples/mods/ is not caught.
+/mods/
+/mod_config/
+/saves/
+/*.log
+debug-report/
+
+# Claude Code worktrees
+/.claude/
+
+# Decomp mirror / generated pipeline output (derived from the user's ROM)
+/elf/
+/recomp/*.sized.elf
+/lib/bh-decomp-build/
