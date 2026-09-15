@@ -32,6 +32,9 @@ if [ ! -f "$ROM" ]; then
     echo "no dump at $ROM" >&2
     exit 1
 fi
+# Absolute from here on: the build below runs in $WORK, and a relative path (build_linux.sh passes
+# `rom.z64`) then reached verify_elf.py pointing at nothing. Found by the first clean-clone build.
+ROM="$(realpath "$ROM")"
 SHA=$(sha1sum "$ROM" | cut -d' ' -f1)
 if [ "$SHA" != "bbb6666f5014a473747ee4145f036d9fb25d7348" ]; then
     echo "this is not Body Harvest (USA): sha1 $SHA" >&2
