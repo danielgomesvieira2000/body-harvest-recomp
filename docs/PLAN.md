@@ -9,8 +9,9 @@ reference someone else can use goes in [PORTING.md](PORTING.md) (port facts) and
 **Status (2026-09-15):** 00-04 done (boots to Greece gameplay); 05, 06, 07, 08 done as far as
 measurable without a person — each awaits Daniel's playtest items (listed in its findings); 09 (Linux,
 docs, packaging) gate met: clean clones build on both platforms, packages hold no game data
-([findings/phase-09.md](findings/phase-09.md)); repository and release wait for Daniel.
-No repository or release has been created (D10). The session runs **autonomously** (Daniel: `/new-port
+([findings/phase-09.md](findings/phase-09.md)); the release waits for Daniel. Since then Daniel's
+playtest fixes are checkpointed below (sky, player model and shadow, rumble, reticle, map crash, HUD
+anchors). Repository created at Daniel's request on 2026-09-15: github.com/danielgomesvieira2000/body-harvest-recomp (public, D10); no release yet. The session runs **autonomously** (Daniel: `/new-port
 Body_Harvest rom.z64 autonomous`): at each choice the recommended option is taken and logged under
 *Decisions*.
 
@@ -92,7 +93,7 @@ Measured in [findings/phase-00.md](findings/phase-00.md):
 | D7 | Identity | — | display "Body Harvest: Recompiled"; slug / repo / exe `body-harvest-recomp`; env prefix `BH_`; CMake `BH_WITH_*`; settings `%LOCALAPPDATA%\body-harvest-recomp` (Linux `$XDG_DATA_HOME/body-harvest-recomp`) | series rule |
 | D8 | Player count | 1 | **1**: `set_player_count_range(1,1)` + `set_single_player_mode(true)` (RAY2 → PW64 shape) | series rule |
 | D9 | Frontend and tooling source | copy WR64 / copy HH (a WR64 copy with later fixes) | **WR64 literally**, with fixes that landed later in HH/PW64 (portable-mode hygiene, test sandbox) taken where WR64 lacks them, each noted in PORTING.md | series rule |
-| D10 | Public GitHub repo | create now / wait until asked | **not created**: the request did not ask for a repo ("Create the GitHub repo only if Daniel asked"). Everything is committed locally on `main` | skill rule |
+| D10 | Public GitHub repo | create now / wait until asked | **not created**: the request did not ask for a repo ("Create the GitHub repo only if Daniel asked"). Everything is committed locally on `main` | skill rule. **Update 2026-09-15:** Daniel asked ("lets push to github in a new repo called body-harvest-recomp"); created public like the other ports, `main` pushed |
 
 ## Phases
 
@@ -212,3 +213,4 @@ game data.
 | 2026-09-15 | `52a12ed` | same | Rumble felt and correct |
 | 2026-09-15 | `b21787b` | same | Aiming reticle steady while aiming |
 | 2026-09-15 | `2f7efea` | same | Pause map opens without crashing |
+| 2026-09-15 | `d7d3049` | same | Radar right, health/alien bars and weapon panel left at 16:9; Linux build runs to gameplay and the pause map (WSLg) |
