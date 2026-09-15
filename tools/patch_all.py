@@ -25,6 +25,7 @@ SCRIPTS = [
     "patch_rt64_inspector.py",     # RT64: port hook in the F1 developer UI; F2 unbound
     "patch_rt64_texturepacks.py",  # RT64: texture packs from mods (after the inspector patch)
     "patch_rt64_pairing.py",       # RT64: count interpolation pairing (RT64_GetTransformPairing)
+    "patch_rt64_l3dex.py",         # RT64: L3DEX 1.x microcodes get F3DEX's command set
 ]
 # ----------------------------------------------------------------------------
 

@@ -1,8 +1,10 @@
 # Phase 04 findings — boot bring-up
 
-**Gate:** in progress. Reached so far: the intro story text renders over its starfield at 60 display
-lists per second, the frontend overlay loads through the wrapped loader. Not yet: title, attract, new
-game into Greece.
+**Gate:** met. Unattended (`tools/scripts/start-spam.txt`): Midway logo, intro story, slot select, name
+entry, the Play menu, the dropship cutscene, and Greece gameplay -- Adam on foot, HUD, radar, dialogue
+with portraits, getting into a truck and driving it. The three overlay kinds load through the wrapper:
+`gameplay_frontend`, `gameplay_outside` (evicting frontend), `level_greece`. Attract demos were not
+waited for (the script presses through them).
 
 Reproduce with:
 
@@ -103,6 +105,25 @@ behaviour.
 (`[bh-load] overlay gameplay_frontend -> 0x80070270`) followed by data loads; at t=30 s the intro story
 ("alien invasion has harvested mankind to the brink of extinction…") renders correctly.
 
+## Run 3 — START on the intro crashes RT64
+
+```
+[bh] ACCESS_VIOLATION ... while reading address 0x2D204520003
+[bh] in function RT64::RDP::loadTLUTOperation + 0x337   (Gfx Thread)
+     <- GBI_RDP::fullSync <- Interpreter::processDisplayLists
+```
+
+The game draws with F3DEX 1.21 and L3DEX 1.21. RT64 `5473732` lists `L3DEX 1.00/1.21/1.23/1.23 (Variant)`
+as `GBIUCode::Unknown`, which gets only the RDP handlers, so an L3DEX list is walked past its end as data
+until a byte pattern looks like a TLUT load. This is the fix 12feihu's port documents (routing L3DEX 1.x
+to F3DEX); re-derived from this crash and RT64's table.
+
+**Fix:** `tools/patch_rt64_l3dex.py` (in `patch_all.py`): the four entries become `GBIUCode::F3DEX`.
+L3DEX's line command (0xB5) then lands on F3DEX's quad slot; nothing visibly missing so far.
+
+**Result:** the contact sheet of 18 window grabs at 5 s intervals, 4-89 s, shows the whole path above.
+No lookup misses, no crash in 90 s.
+
 ## Negative results
 
 - **Message-queue control defaults** — installed, no change to the two-frame stall.
@@ -117,5 +138,6 @@ behaviour.
 
 ## What is not established
 
-- Title screen, attract demos, new game into Greece.
-- L3DEX 1.21 GBI mapping (the third-party port's finding) — not hit yet.
+- Attract demos and their speed; the title screen when nothing is pressed.
+- Whether L3DEX lines are drawn anywhere (0xB5 as a degenerate quad would hide them).
+- The `inside` overlay (a building), a level change, EEPROM write -- phase 05.
