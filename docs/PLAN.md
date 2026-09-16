@@ -216,3 +216,4 @@ game data.
 | 2026-09-15 | `da84d95` | same + `patch_runtime_timer.py` | Rumble timing correct with the controller loop at ~285 passes/s |
 | 2026-09-15 | `dfdf975` | same | Entering a house, walking inside and leaving works |
 | 2026-09-15 | `d7d3049` | same | Radar right, health/alien bars and weapon panel left at 16:9; Linux build runs to gameplay and the pause map (WSLg) |
+| 2026-09-16 | `9496c12` | same | Inside a Greece house at 16:9, walls and far furniture no longer vanish |
