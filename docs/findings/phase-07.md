@@ -183,4 +183,20 @@ game's display list before the call and an end marker after it:
 - ~~Whether the cutscene's top/bottom bands should stay~~ **Decided by Daniel (2026-09-15): keep
   them.** They are the game's own cinematic letterbox (the "no black bars" exception for an original
   letterbox).
-- Buildings (`inside` overlay) and vehicles' own culls at wide aspects.
+- ~~Buildings (`inside` overlay)~~ **done 2026-09-16** (next section); vehicles' own culls at wide aspects.
+
+## Change — the interior cull (`BH_NO_WIDE_INSIDE_CULL`)
+
+**Symptom (Daniel, first Greece interior, 16:9):** "Any item that is too far away goes invisible"; in the
+PrintWindow grab the left wall was missing, with background in its place, while the right wall showed.
+
+**Measured / read:** the outdoor fix does not reach buildings. Every cell and object draw in
+`inside/158330.c` calls `func_8007C428_1644E8`; its recompiled MIPS (the decomp's C is `NON_MATCHING` and
+has the wrong arity) shows a 50° cone from the 9th argument and a hard `slti 0x3C1` distance limit
+(GAME-INTERNALS.md "Culling inside buildings").
+
+**Change:** native copy of the test; widened cone and a room-diagonal limit only for points the game
+rejects, under a matrix-pool/display-list headroom check (PORTING.md).
+
+**Result:** Daniel: "That fixed it." Not measured: the `BH_INSIDE_CULL_TRACE` counts (log locked while the
+game ran), the per-frame cost, and larger interiors near the matrix budget.

@@ -226,6 +226,18 @@ against `D_8014FD2A` (full horizontal cull angle, BAM). `src/widescreen.cpp` wra
 overlay: wrappers for overlay functions are re-registered from `bh::overlay_loaded` after every load of
 that overlay, because the load overwrites the function-map entries.
 
+**Symptom: indoors, walls, floor and furniture vanish at a distance and at the sides.** Buildings do not
+use `D_8014FD2A`: every floor/wall cell and room object goes through `func_8007C428_1644E8` (inside
+overlay; test in GAME-INTERNALS.md "Culling"), with a 50° cone and a fixed 961-unit limit.
+`src/widescreen.cpp` replaces it (registered from `bh::overlay_loaded` for overlay 2) with a native copy
+of the same test; a point the game rejects is re-tested with the cone widened to the window aspect ×
+`BH_CULL_MARGIN` and the limit raised to the room diagonal + one cell (never below 961). Draws only the
+widened test admits are refused when the frame's matrix pool (283 matrices, `D_8005BB20 + 0x1E280..0x22B00`)
+has fewer than 48 left or the display list fewer than 1024 commands: the game never bounds either.
+`BH_INSIDE_CULL_TRACE=1` also runs the recompiled original beside the copy and counts disagreements.
+Confirmed by Daniel in the first Greece interior (left wall and far furniture stay drawn). Not measured:
+the trace's counts, and the cost.
+
 ## Frontend and the F1 inspector
 
 RecompFrontend as Wave Race 64 / Hybrid Heaven: launcher (Load ROM → Start Game, Controls, Settings,
@@ -313,6 +325,7 @@ Rerun it after any submodule update.
 | `BH_NO_HUD_ANCHORS=1` | radar, bars and weapon panel stay in the 4:3 middle |
 | `BH_NO_LOADER_SLOT=1` / `BH_STRICT_MEMORY=1` | leave the building loader's destination unseeded (crashes on entering) / crash on any read of unmapped N64 memory |
 | `BH_NO_WIDE_CULL=1` / `BH_CULL_MARGIN=<pct>` / `BH_CULL_TRACE=1` | keep the game's 4:3 cull angle / margin over the aspect (default 10) / log every change |
+| `BH_NO_WIDE_INSIDE_CULL=1` / `BH_INSIDE_CULL_TRACE=1` | buildings keep the game's cull cone and 961-unit limit / per-second counts: game admits, widening adds, budget refused, native/original mismatches |
 
 ### Test runs
 

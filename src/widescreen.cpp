@@ -6,11 +6,13 @@
 // so a function registered here replaces the game's for every caller.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "recomp.h"
 #include "librecomp/overlays.hpp"
@@ -135,6 +137,149 @@ void cull_angle_widened(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// ---- the interior cull, widened and lengthened ---------------------------------
+//
+// Symptom: inside a building, walls, floor cells and furniture vanish at the sides
+// of a wide picture and at a distance (Daniel, the first Greece interior: "any item
+// that is too far away goes invisible", the left wall gone).
+//
+// Cause: the inside overlay has its own test, untouched by D_8014FD2A.
+// func_8007C428_1644E8(x, y, z, radius, <4 unused stack args>, cone) decides every
+// floor/wall cell (func_8007453C_15C5FC, radius 0x48) and every room object
+// (func_80074FF0_15D0B0, func_8007568C_15D74C, radius 1.5 x half the footprint).
+// It transforms the point by the view matrix D_800E7350, takes its distance r and
+// view-plane angle a (func_80003824), turns a by cone/2 and rejects when
+//   sins(a) * r < -radius              (outside one edge of the cone)
+//   sins(a - cone) * r > radius        (outside the other)
+//   coss(a - cone) * r < 40 - radius   (behind the camera)
+//   coss(a - cone) * r >= 961          (beyond a fixed distance)
+// Every caller passes cone 0x238E (50 degrees) -- narrower than a 4:3 view with
+// fovy 45 (58 degrees), with the radius as the slack -- and 961 units is ten cells.
+//
+// Fix: the same test, natively (the game's sins/coss/atan tables via the
+// recompiled functions), with the cone's half-angle tangent scaled by the window
+// aspect over 4:3 times BH_CULL_MARGIN (as outdoors), and the distance limit raised
+// to the room's diagonal plus a cell (D_800E6460/64 cells of 96 units), never below
+// the game's 961. Nothing in the game bounds its per-frame matrix pool (D_8005BB20 +
+// 0x1E280 .. + 0x22B00, 283 matrices) or display list (+0x280 .. +0xE380), so a
+// point only the widened test admits is still rejected when either has less than
+// kReserve left: the player, NPCs and effects draw after the room.
+// BH_NO_WIDE_INSIDE_CULL=1 leaves the game's test; BH_INSIDE_CULL_TRACE=1 prints,
+// once a second, how many points each test admitted and how many the budget refused.
+extern "C" void func_8007C428_1644E8(uint8_t* rdram, recomp_context* ctx);
+extern "C" void func_80003824_4424(uint8_t* rdram, recomp_context* ctx);
+extern "C" void sins(uint8_t* rdram, recomp_context* ctx);
+extern "C" void coss(uint8_t* rdram, recomp_context* ctx);
+constexpr uint32_t kInsideCullFunc = 0x8007C428;
+constexpr gpr kViewMatrix = static_cast<gpr>(static_cast<int32_t>(0x800E7350));     // D_800E7350, f32[4][4]
+constexpr gpr kRoomCellsX = static_cast<gpr>(static_cast<int32_t>(0x800E6460));     // D_800E6460
+constexpr gpr kRoomCellsZ = static_cast<gpr>(static_cast<int32_t>(0x800E6464));     // D_800E6464
+constexpr gpr kFrameBufferBase = static_cast<gpr>(static_cast<int32_t>(0x8005BB20));  // D_8005BB20
+constexpr gpr kMatrixCursor = static_cast<gpr>(static_cast<int32_t>(0x8005BB38));   // D_8005BB38
+constexpr gpr kInsideGfxCursor = static_cast<gpr>(static_cast<int32_t>(0x8005BB2C));  // D_8005BB2C
+
+int32_t game_trig(uint8_t* rdram, recomp_context* ctx, void (*fn)(uint8_t*, recomp_context*), int32_t angle) {
+    ctx->r4 = angle & 0xFFFF;
+    fn(rdram, ctx);
+    return static_cast<int32_t>(ctx->r2);
+}
+
+int32_t scaled(int32_t table, int32_t r) {
+    return static_cast<int32_t>((static_cast<double>(static_cast<float>(table)) / 32768.0) * static_cast<double>(r));
+}
+
+struct InsideCullStats {
+    uint32_t calls = 0, game_visible = 0, wide_visible = 0, budget_refused = 0, mismatches = 0;
+};
+
+void inside_cull_widened(uint8_t* rdram, recomp_context* ctx) {
+    const int16_t x = static_cast<int16_t>(ctx->r4);
+    const int16_t y = static_cast<int16_t>(ctx->r5);
+    const int16_t z = static_cast<int16_t>(ctx->r6);
+    const int32_t radius = static_cast<uint16_t>(ctx->r7);
+    const int32_t cone = static_cast<int16_t>(MEM_H(0x22, ctx->r29));   // 9th argument, caller's sp + 0x20
+    const gpr args[4] = {ctx->r4, ctx->r5, ctx->r6, ctx->r7};
+
+    auto m = [&](int off) {
+        float f;
+        const uint32_t bits = static_cast<uint32_t>(MEM_W(off, kViewMatrix));
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    };
+    const float fx = x, fy = y, fz = z;
+    const int32_t x_view = static_cast<int32_t>(m(0x30) + ((fx * m(0x00) + fy * m(0x10)) + fz * m(0x20)));
+    const int32_t depth = -static_cast<int32_t>(m(0x38) + ((fx * m(0x08) + fy * m(0x18)) + fz * m(0x28)));
+    const uint32_t sq = static_cast<uint32_t>(x_view) * static_cast<uint32_t>(x_view) +
+                        static_cast<uint32_t>(depth) * static_cast<uint32_t>(depth);
+    const int32_t r = static_cast<int32_t>(std::sqrt(static_cast<float>(static_cast<int32_t>(sq))));
+
+    ctx->f12.fl = static_cast<float>(depth);
+    ctx->f14.fl = static_cast<float>(x_view);
+    func_80003824_4424(rdram, ctx);
+    const int32_t bearing = static_cast<int32_t>(ctx->r2);
+
+    auto test = [&](int32_t cone_bam, int32_t far_limit) {
+        const int32_t a = cone_bam / 2 + bearing;
+        if (scaled(game_trig(rdram, ctx, sins, a), r) < -radius) return false;
+        const int32_t edge = a - cone_bam;
+        const int32_t along = scaled(game_trig(rdram, ctx, coss, edge), r);
+        if (radius < scaled(game_trig(rdram, ctx, sins, edge), r)) return false;
+        if (along < 0x28 - radius) return false;
+        return along < far_limit;
+    };
+
+    static InsideCullStats stats;
+    static const bool trace = std::getenv("BH_INSIDE_CULL_TRACE") != nullptr;
+    ++stats.calls;
+
+    bool visible = test(cone, 0x3C1);
+    if (trace) {
+        // The native copy of the game's test must agree with the recompiled one.
+        ctx->r4 = args[0]; ctx->r5 = args[1]; ctx->r6 = args[2]; ctx->r7 = args[3];
+        func_8007C428_1644E8(rdram, ctx);
+        if ((ctx->r2 != 0) != visible) ++stats.mismatches;
+    }
+    if (visible) {
+        ++stats.game_visible;
+    }
+    else {
+        float aspect = 4.0f / 3.0f;
+        if (ultramodern::renderer::get_graphics_config().ar_option != ultramodern::renderer::AspectRatio::Original) {
+            aspect = std::max(aspect, bh::window_aspect());
+        }
+        const double half = (cone * 0.5) * (2.0 * 3.14159265358979 / 65536.0);
+        const double wide_half = std::atan(std::tan(half) * (aspect / (4.0 / 3.0)) * cull_margin());
+        const int32_t wide_cone = std::min(static_cast<int32_t>(2.0 * wide_half * (65536.0 / (2.0 * 3.14159265358979))), 0x7FFF);
+        const double cells_x = MEM_W(0, kRoomCellsX), cells_z = MEM_W(0, kRoomCellsZ);
+        const int32_t far_limit = std::max<int32_t>(0x3C1, static_cast<int32_t>(std::hypot(cells_x, cells_z) * 96.0) + 96);
+        if (test(wide_cone, far_limit)) {
+            ++stats.wide_visible;
+            // The frame's buffers, laid out by func_8000F368_FF68.
+            constexpr uint32_t kReserveMatrices = 48 * 0x40;
+            constexpr uint32_t kReserveGfx = 1024 * 8;
+            const uint32_t base = static_cast<uint32_t>(MEM_W(0, kFrameBufferBase));
+            const uint32_t mtx = static_cast<uint32_t>(MEM_W(0, kMatrixCursor));
+            const uint32_t gfx = static_cast<uint32_t>(MEM_W(0, kInsideGfxCursor));
+            const bool room = mtx + kReserveMatrices <= base + 0x22B00 && gfx + kReserveGfx <= base + 0xE380;
+            visible = room;
+            if (!room) ++stats.budget_refused;
+        }
+    }
+
+    if (trace) {
+        static auto last = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last >= std::chrono::seconds(1)) {
+            last = now;
+            std::fprintf(stderr, "[bh] inside cull: %u tests, game admits %u, widened adds %u, budget refused %u, native/game mismatches %u\n",
+                         stats.calls, stats.game_visible, stats.wide_visible, stats.budget_refused, stats.mismatches);
+            std::fflush(stderr);
+            stats = {};
+        }
+    }
+    ctx->r2 = visible ? 1 : 0;
+}
+
 // ---- HUD widgets anchored to the edges ------------------------------------------
 //
 // Symptom: at 16:9 and wider the radar, the health and alien bars and the weapon
@@ -202,6 +347,10 @@ void overlay_loaded(size_t overlay_id) {
     // recomp/overlays.txt order: 1 = .overlay_gameplay_outside.
     if (overlay_id == 1 && !env_off_flag("BH_NO_WIDE_CULL")) {
         recomp::overlays::add_loaded_function(static_cast<int32_t>(kCullAngleFunc), cull_angle_widened);
+    }
+    // 2 = .overlay_gameplay_inside.
+    if (overlay_id == 2 && !env_off_flag("BH_NO_WIDE_INSIDE_CULL")) {
+        recomp::overlays::add_loaded_function(static_cast<int32_t>(kInsideCullFunc), inside_cull_widened);
     }
     if (overlay_id == 1 && !env_off_flag("BH_NO_HUD_ANCHORS")) {
         recomp::overlays::add_loaded_function(static_cast<int32_t>(kHudBarFunc), hud_bar_anchored);

@@ -88,6 +88,18 @@ built); retrace (type 1) and done (type 2) messages arrive on `D_8006A908` (8 sl
   `func_800B960C_C85BC` (camera-relative box, then angle) and entity tests `func_800B93AC_C835C`
   (angle + 4000 units), `func_800B9228_C81D8` (angle + 4500 units). `D_80157590 != 0` bypasses them
   (third-party port). Observed values: `0x2EE0`, `0x30C0`, `0x694C` with pitch.
+- **Culling inside buildings** (separate from `D_8014FD2A`): `func_8007C428_1644E8(x, y, z, radius,
+  4 unused stack args, cone)`. Read from the recompiled MIPS; the decomp's C for it is `NON_MATCHING` with a
+  5-argument signature, and `cone` is the 9th argument (caller `sp+0x22`). Point → view matrix
+  `D_800E7350` (f32[4][4]); `x = [3][0] + …`, `d = -([3][2] + …)`; `r = (s32)sqrtf(x² + d²)`;
+  `a = cone/2 + func_80003824(d, x)`. Rejected when `sins(a)·r < -radius`, `sins(a-cone)·r > radius`,
+  `coss(a-cone)·r < 40 - radius`, or `coss(a-cone)·r >= 961` (`/32768` on each table value).
+  Callers: floor/wall cells `func_8007453C_15C5FC` (cell centre, y 0x30, radius 0x48; cells are 96 units,
+  room `D_800E6460`×`D_800E6464` cells), objects `func_80074FF0_15D0B0` / `func_8007568C_15D74C` (radius
+  1.5 × half the larger footprint side). All pass cone `0x238E` (50°).
+- **Per-frame buffers** (`func_8000F368_FF68`, base `D_8005BB20`): display list `D_8005BB2C` +0x280..+0xE380,
+  vertices +0xF500..+0x1E280, matrices `D_8005BB38` +0x1E280..+0x22B00 (0x40 each, 283). The drawing code
+  never checks the ends.
 - **Frontend backdrops:** grids of 32×32 texture rectangles covering 320 px (title rows at y 176/208,
   intro at 192/224).
 - **Outdoor sky:** after the depth clear (fill `0xFFFC` on colour image `0x003DA800`), a sky-colour fill
