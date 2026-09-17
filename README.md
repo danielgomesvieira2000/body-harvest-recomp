@@ -1,7 +1,7 @@
 # Body Harvest: Recompiled
 
-> **Status: in development, not released.** It boots and plays the start of Greece; most of the game
-> has not been played in the port yet.
+> **Status: early release (0.1.0), very untested.** It boots and plays the start of Greece; most of the
+> game has not been played in the port yet.
 
 A native PC port of Body Harvest for Windows and Linux, made by statically recompiling the game with
 [N64Recomp](https://github.com/N64Recomp/N64Recomp). Unofficial, and not affiliated with the game's
@@ -21,11 +21,16 @@ works.
 - EEPROM saves and the Rumble Pak, with a rumble strength setting
 - F1 debug menu with a live HUD editor
 
-Planned: HUD elements anchored to the screen edges.
+- HUD anchored to the screen edges in widescreen (radar, bars, weapon panel)
 
 ## Getting started
 
-Releases are not published yet. To build it yourself:
+Download the Windows or Linux package from
+[Releases](https://github.com/danielgomesvieira2000/body-harvest-recomp/releases/latest). Windows: unzip
+and run `body-harvest-recomp.exe`. Linux: extract and run `./body-harvest-recomp.sh`. Pick your dump in the
+launcher.
+
+To build it yourself:
 
 Linux (Debian/Ubuntu, or WSL):
 

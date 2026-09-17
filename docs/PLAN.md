@@ -11,7 +11,7 @@ measurable without a person — each awaits Daniel's playtest items (listed in i
 docs, packaging) gate met: clean clones build on both platforms, packages hold no game data
 ([findings/phase-09.md](findings/phase-09.md)); the release waits for Daniel. Since then Daniel's
 playtest fixes are checkpointed below (sky, player model and shadow, rumble, reticle, map crash, HUD
-anchors). Repository created at Daniel's request on 2026-09-15: github.com/danielgomesvieira2000/body-harvest-recomp (public, D10); no release yet. The session runs **autonomously** (Daniel: `/new-port
+anchors). Repository created at Daniel's request on 2026-09-15: github.com/danielgomesvieira2000/body-harvest-recomp (public, D10). **0.1.0 released 2026-09-17** at Daniel's request, from checkpoint `9496c12`. The session runs **autonomously** (Daniel: `/new-port
 Body_Harvest rom.z64 autonomous`): at each choice the recommended option is taken and logged under
 *Decisions*.
 

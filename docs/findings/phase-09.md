@@ -134,3 +134,6 @@ The clone's exe in `test_sandbox.py` (45 s, `start-spam.txt`): audio audible, ba
 | A clean clone builds with the documented commands, Windows | **met** |
 | Packages contain no game data | **met** (both packagers, contents listed) |
 | Repository and first release | not done: only when Daniel asks (D10) |
+
+**Update 2026-09-17:** Daniel asked for the first release; 0.1.0 published from checkpoint `9496c12`
+(notes `docs/releases/0.1.0.md`).
